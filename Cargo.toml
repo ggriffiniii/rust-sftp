@@ -1,0 +1,8 @@
+[package]
+name = "sftp"
+version = "0.1.0"
+authors = ["glenng"]
+
+[dependencies]
+rustc-serialize = "0.3"
+byteorder = "*"
