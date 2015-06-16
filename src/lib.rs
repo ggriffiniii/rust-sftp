@@ -14,7 +14,7 @@ use packets::Sendable;
 use std::io::Write;
 use packets::Request;
 use std::thread;
-use std::sync::{Arc, Mutex, atomic};
+use std::sync::{Arc, Mutex, MutexGuard, atomic};
 use std::collections::HashMap;
 use std::sync::mpsc;
 
@@ -23,7 +23,7 @@ type ReqMap = HashMap<ReqId, mpsc::Sender<Result<packets::SftpResponsePacket>>>;
 
 struct ReceiverState {
     requests: ReqMap,
-    prev_error: bool,
+    recv_error: Option<Arc<Box<error::Error>>>,
 }
 
 struct ClientReceiver<R> {
@@ -32,14 +32,11 @@ struct ClientReceiver<R> {
 }
 
 impl<R> ClientReceiver<R> where R : 'static + io::Read + Send {
-    fn recv(&self) -> Result<()> {
+    fn recv(&self) {
         let mut r = self.r.lock().unwrap();
         loop {
             let resp = match packets::recv(&mut *r) {
-                Err(x) => {
-                    self.broadcastErr();
-                    return Err(std::convert::From::from(x));
-                },
+                Err(e) => { Self::broadcast_error(&mut self.state.lock().unwrap(), e); return; },
                 Ok(x) => x,
             };
             let mut state = self.state.lock().unwrap();
@@ -47,26 +44,18 @@ impl<R> ClientReceiver<R> where R : 'static + io::Read + Send {
                 Some(tx) => {
                     tx.send(Ok(resp.packet));
                 },
-                None => {
-                    for (_, tx) in state.requests.iter() {
-                        tx.send(Err(error::Error::NoMatchingRequest(resp.req_id)));
-                    }
-                    state.requests.clear();
-                    return Err(error::Error::NoMatchingRequest(resp.req_id));
-                },
+                None => { Self::broadcast_error(&mut state, error::Error::NoMatchingRequest(resp.req_id)); return; },
             }
         }
-        Ok(())
     }
 
-    fn broadcastErr(&self) {
-        let mut state = self.state.lock().unwrap();
-        state.prev_error = true;
+    fn broadcast_error(state: &mut MutexGuard<ReceiverState>, e: error::Error) {
+        let arc_wrapped = Arc::new(Box::new(e));
         for (_, tx) in state.requests.iter() {
-            //TODO: send better error
-            tx.send(Err(error::Error::PreviousError));
+            tx.send(Err(error::Error::ReceiverDisconnected(arc_wrapped.clone())));
         }
         state.requests.clear();
+        state.recv_error = Some(arc_wrapped.clone());
     }
 }
 
@@ -101,8 +90,8 @@ impl<W> ClientSender<W> where W : 'static + io::Write + Send {
         let (tx, rx) = mpsc::channel();
         {
             let mut recv_state = self.recv_state.lock().unwrap();
-            if recv_state.prev_error {
-                return Err(error::Error::PreviousError);
+            if let Some(ref e) = recv_state.recv_error {
+                return Err(error::Error::ReceiverDisconnected(e.clone()));
             }
             recv_state.requests.insert(req_id, tx);
         }
@@ -133,7 +122,7 @@ impl<W> Client<W> where W : 'static + io::Write + Send {
 	pub fn new<R>(mut r: R, mut w: W) -> Result<Client<W>> where R : 'static + io::Read + Send {
         let mut s = ClientSender{
             w: Mutex::new(w),
-            recv_state: Arc::new(Mutex::new(ReceiverState{requests: HashMap::new(), prev_error: false})),
+            recv_state: Arc::new(Mutex::new(ReceiverState{requests: HashMap::new(), recv_error: None})),
             req_id: atomic::AtomicUsize::new(0),
         };
         try!(s.send_init());
@@ -145,7 +134,7 @@ impl<W> Client<W> where W : 'static + io::Write + Send {
                     return Err(error::Error::MismatchedVersion(x.version));
                 }
             },
-            x => return Err(error::Error::UnexpectedResponse(x)),
+            x => return Err(error::Error::UnexpectedResponse(Box::new(x))),
         }
         let mut r = ClientReceiver{
             r: Mutex::new(r),
@@ -162,7 +151,7 @@ impl<W> Client<W> where W : 'static + io::Write + Send {
             packets::SftpResponsePacket::Attrs(attrs) => {
                 Ok(attrs)
             },
-            x => Err(error::Error::UnexpectedResponse(x))
+            x => Err(error::Error::UnexpectedResponse(Box::new(x)))
         }
     }
 
@@ -185,7 +174,7 @@ impl<W> File<W>  where W : 'static + io::Write + Send {
             packets::SftpResponsePacket::Attrs(attrs) => {
                 Ok(attrs)
             },
-            x => Err(error::Error::UnexpectedResponse(x))
+            x => Err(error::Error::UnexpectedResponse(Box::new(x)))
         }
     }
 }

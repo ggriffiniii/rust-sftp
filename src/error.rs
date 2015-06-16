@@ -1,19 +1,25 @@
 extern crate byteorder;
 
+use std::error;
+use std::error::Error as StdError;
+use std::fmt;
 use std::io;
 use self::byteorder::Error as ByteError;
+use std::sync::Arc;
 
 use packets;
 
+pub type Result<T> = ::std::result::Result<T, Error>;
+
 #[derive(Debug)]
 pub enum Error {
+    ReceiverDisconnected(Arc<Box<Error>>),
     Io(io::Error),
     UnexpectedData,
     UnexpectedEOF,
-    PreviousError,
     NoMatchingRequest(u32),
     MismatchedVersion(u32),
-    UnexpectedResponse(packets::SftpResponsePacket),
+    UnexpectedResponse(Box<packets::SftpResponsePacket>),
 }
 
 impl From<io::Error> for Error {
@@ -31,5 +37,39 @@ impl From<ByteError> for Error {
     }
 }
 
-pub type Result<T> = ::std::result::Result<T, Error>;
+impl error::Error for Error {
+    fn description(&self) -> &str {
+        match *self {
+            Error::ReceiverDisconnected(ref e) => "Receiver disconnected.",
+            Error::Io(ref e) => e.description(),
+            Error::UnexpectedData => "Unexpected data in message.",
+            Error::UnexpectedEOF => "Unexpected EOF.",
+            Error::NoMatchingRequest(ref req_id) => "Response received with an unexpected request-id.",
+            Error::MismatchedVersion(ref ver) => "Server responded with an incorrect version",
+            Error::UnexpectedResponse(_) => "Unexpected response",
+        }
+    }
+
+    fn cause(&self) -> Option<&error::Error> {
+        match *self {
+            Error::ReceiverDisconnected(ref e) => Some(&***e),
+            Error::Io(ref err) => err.cause(),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            Error::ReceiverDisconnected(ref e) => write!(f, "Receiver disconnected."),
+            Error::Io(ref e) => e.fmt(f),
+            Error::UnexpectedData => write!(f, "Unexpected data in message."),
+            Error::UnexpectedEOF => write!(f, "Unexpected EOF."),
+            Error::NoMatchingRequest(ref req_id) => write!(f, "Response received with an unexpected request-id: {}", req_id),
+            Error::MismatchedVersion(ref ver) => write!(f, "Server responded with version {}. Only version 3 is supported.", ver),
+            Error::UnexpectedResponse(_) => write!(f, "Unexpected response"),
+        }
+    }
+}
 
