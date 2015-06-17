@@ -32,7 +32,7 @@ const SSH_FXP_STAT : u8 = 17;
 
 // Responses
 const SSH_FXP_STATUS : u8 = 101;
-//const SSH_FXP_HANDLE : u8 = 102;
+const SSH_FXP_HANDLE : u8 = 102;
 //const SSH_FXP_DATA : u8 = 103;
 //const SSH_FXP_NAME : u8 = 104;
 const SSH_FXP_ATTRS : u8 = 105;
@@ -65,6 +65,7 @@ pub struct SftpResponse {
 pub enum SftpResponsePacket {
     Version(FxpVersion),
     Status(FxpStatus),
+    Handle(FxpHandle),
     Attrs(FileAttr),
     Unknown{msg_type: u8, data: Vec<u8>},
 }
@@ -131,6 +132,20 @@ pub struct FileAttr {
     pub atime : Option<u32>,
     pub mtime : Option<u32>,
     pub extensions : Vec<Extension>,
+}
+
+impl FileAttr {
+    pub fn new() -> FileAttr {
+        FileAttr{
+            size: None,
+            uid: None,
+            gid: None,
+            perms: None,
+            atime: None,
+            mtime: None,
+            extensions: Vec::new()
+        }
+    }
 }
 
 impl Sendable for FileAttr {
@@ -245,6 +260,28 @@ impl Sendable for FxpInit {
 }
 
 #[derive(Debug)]
+pub struct FxpOpen {
+    pub filename : Vec<u8>,
+    pub pflags : u32,
+    pub attrs : FileAttr,
+}
+
+impl Request for FxpOpen {
+    fn msg_type() -> u8 { SSH_FXP_OPEN }
+}
+
+impl Sendable for FxpOpen {
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
+        let mut n : usize = 0;
+        n += try!(self.filename.write_to(w));
+        try!(w.write_u32::<BigEndian>(self.pflags));
+        n += 4;
+        n += try!(self.attrs.write_to(w));
+        Ok(n)
+    }
+}
+
+#[derive(Debug)]
 pub struct FxpFStat {
     pub handle : Vec<u8>
 }
@@ -349,7 +386,20 @@ impl Receivable for FxpStatus {
     }
 }
 
+#[derive(Debug)]
+pub struct FxpHandle {
+    pub handle: Vec<u8>,
+}
 
+impl Response for FxpHandle {
+    fn msg_type() -> u8 { SSH_FXP_HANDLE }
+}
+
+impl Receivable for FxpHandle {
+    fn recv<R: io::Read>(r: &mut io::Take<R>) -> Result<FxpHandle> {
+        Ok(FxpHandle{handle: try!(Vec::<u8>::recv(r))})
+    }
+}
 
 pub fn recv<R : io::Read>(r: &mut R) -> Result<SftpResponse> {
     let l = try!(r.read_u32::<BigEndian>());
@@ -372,6 +422,8 @@ pub fn recv<R : io::Read>(r: &mut R) -> Result<SftpResponse> {
         SftpResponsePacket::Version(try!(FxpVersion::recv(&mut lr)))
     } else if msg_type == SSH_FXP_STATUS {
         SftpResponsePacket::Status(try!(FxpStatus::recv(&mut lr)))
+    } else if msg_type == SSH_FXP_HANDLE {
+        SftpResponsePacket::Handle(try!(FxpHandle::recv(&mut lr)))
     } else if msg_type == SSH_FXP_ATTRS {
         SftpResponsePacket::Attrs(try!(FileAttr::recv(&mut lr)))
     } else {

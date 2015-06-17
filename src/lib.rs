@@ -155,8 +155,74 @@ impl<W> Client<W> where W : 'static + io::Write + Send {
         }
     }
 
+    pub fn open_options(&mut self) -> OpenOptions<W> {
+        OpenOptions{client: self, flags: 0}
+    }
+
+    fn open(&mut self, filename: String, pflags: u32) -> Result<File<W>> {
+        let p = packets::FxpOpen{
+            filename: filename.into_bytes(),
+            pflags: pflags,
+            attrs: packets::FileAttr::new(),
+        };
+        let resp = try!(self.sender.send_receive(&p));
+        match resp {
+            packets::SftpResponsePacket::Handle(handle) => {
+                Ok(File{client: self.sender.clone(), handle: handle.handle, offset: 0})
+            },
+            x => Err(error::Error::UnexpectedResponse(Box::new(x))),
+        }
+    }
+}
+
+const SSH_FXF_READ : u32 = 0x00000001;
+const SSH_FXF_WRITE : u32 = 0x00000002;
+const SSH_FXF_APPEND : u32 = 0x00000004;
+const SSH_FXF_CREAT : u32 = 0x00000008;
+const SSH_FXF_TRUNC : u32 = 0x00000010;
+const SSH_FXF_EXCL : u32 = 0x00000020;
+
+pub struct OpenOptions<'a, W> where W: 'a {
+    client: &'a mut Client<W>,
+    flags: u32,
+}
+
+impl<'a, W> OpenOptions<'a, W> where W : 'static + io::Write + Send {
+    fn flag(&mut self, bit: u32, enabled: bool) -> &mut OpenOptions<'a, W> {
+        if enabled {
+            self.flags |= bit;
+        } else {
+            self.flags &= !bit;
+        }
+        self
+    }
+
+    pub fn read(&mut self, read: bool) -> &mut OpenOptions<'a, W> {
+        self.flag(SSH_FXF_READ, read)
+    }
+
+    pub fn write(&mut self, write: bool) -> &mut OpenOptions<'a, W> {
+        self.flag(SSH_FXF_WRITE, write)
+    }
+
+    pub fn append(&mut self, append: bool) -> &mut OpenOptions<'a, W> {
+        self.flag(SSH_FXF_APPEND, append)
+    }
+
+    pub fn create(&mut self, create: bool) -> &mut OpenOptions<'a, W> {
+        self.flag(SSH_FXF_CREAT, create)
+    }
+
+    pub fn truncate(&mut self, truncate: bool) -> &mut OpenOptions<'a, W> {
+        self.flag(SSH_FXF_TRUNC, truncate)
+    }
+
+    pub fn exclude(&mut self, exclude: bool) -> &mut OpenOptions<'a, W> {
+        self.flag(SSH_FXF_EXCL, exclude)
+    }
+
     pub fn open(&mut self, path: String) -> Result<File<W>> {
-        Ok(File{client: self.sender.clone(), handle: Vec::<u8>::new(), offset: 0})
+        self.client.open(path, self.flags)
     }
 }
 
@@ -167,7 +233,7 @@ pub struct File<W> {
 }
 
 impl<W> File<W>  where W : 'static + io::Write + Send {
-    fn stat(&mut self) -> Result<packets::FileAttr> {
+    pub fn stat(&mut self) -> Result<packets::FileAttr> {
         let p = packets::FxpFStat{handle: self.handle.clone()};
         let resp = try!(self.client.send_receive(&p));
         match resp {
