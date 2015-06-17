@@ -2,6 +2,7 @@ extern crate byteorder;
 
 use self::byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 
+use std::fmt;
 use std::io;
 use std::io::Read;
 use error::{Error, Result};
@@ -12,7 +13,7 @@ const SSH_FXP_VERSION : u8 = 2;
 
 // Requests
 const SSH_FXP_OPEN : u8 = 3;
-//const SSH_FXP_CLOSE : u8 = 4;
+const SSH_FXP_CLOSE : u8 = 4;
 //const SSH_FXP_READ : u8 = 5;
 //const SSH_FXP_WRITE : u8 = 6;
 //const SSH_FXP_LSTAT : u8 = 7;
@@ -39,7 +40,7 @@ const SSH_FXP_ATTRS : u8 = 105;
 //const SSH_FXP_EXTENDED : u8 = 200;
 //const SSH_FXP_EXTENDED_REPLY : u8 = 201;
 
-pub trait Request : Sendable {
+pub trait Request : fmt::Debug + Sendable {
     fn msg_type() -> u8;
 }
 
@@ -47,7 +48,7 @@ pub trait Sendable {
     fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize>;
 }
 
-pub trait Response : Receivable {
+pub trait Response : fmt::Debug + Receivable {
     fn msg_type() -> u8;
 }
 
@@ -278,6 +279,21 @@ impl Sendable for FxpOpen {
         n += 4;
         n += try!(self.attrs.write_to(w));
         Ok(n)
+    }
+}
+
+#[derive(Debug)]
+pub struct FxpClose {
+    pub handle: Vec<u8>,
+}
+
+impl Request for FxpClose {
+    fn msg_type() -> u8 { SSH_FXP_CLOSE }
+}
+
+impl Sendable for FxpClose {
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
+        Ok(try!(self.handle.write_to(w)))
     }
 }
 

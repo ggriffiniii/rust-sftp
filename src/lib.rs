@@ -102,6 +102,7 @@ impl<W> ClientSender<W> where W : 'static + io::Write + Send {
         try!(w.write_all(&[P::msg_type()][..]));
         try!(w.write_u32::<BigEndian>(req_id));
         try!(w.write_all(bytes.as_slice()));
+        writeln!(&mut io::stderr(), "Send Request: {:?}", *packet);
         Ok(rx)
     }
 
@@ -226,7 +227,7 @@ impl<'a, W> OpenOptions<'a, W> where W : 'static + io::Write + Send {
     }
 }
 
-pub struct File<W> {
+pub struct File<W> where W : 'static + io::Write + Send {
     client: Arc<ClientSender<W>>,
     handle: Vec<u8>,
     offset: u64,
@@ -242,6 +243,13 @@ impl<W> File<W>  where W : 'static + io::Write + Send {
             },
             x => Err(error::Error::UnexpectedResponse(Box::new(x)))
         }
+    }
+}
+
+impl<W> Drop for File<W> where W : 'static + io::Write + Send {
+    fn drop(&mut self) {
+        let p = packets::FxpClose{handle: self.handle.clone()};
+        self.client.send_receive(&p);
     }
 }
 
