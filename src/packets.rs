@@ -5,6 +5,7 @@ use self::byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 use std::fmt;
 use std::io;
 use std::io::Read;
+use std::error::Error as StdError;
 use error::{Error, Result};
 
 // Init
@@ -14,7 +15,7 @@ const SSH_FXP_VERSION : u8 = 2;
 // Requests
 const SSH_FXP_OPEN : u8 = 3;
 const SSH_FXP_CLOSE : u8 = 4;
-//const SSH_FXP_READ : u8 = 5;
+const SSH_FXP_READ : u8 = 5;
 //const SSH_FXP_WRITE : u8 = 6;
 //const SSH_FXP_LSTAT : u8 = 7;
 const SSH_FXP_FSTAT : u8 = 8;
@@ -34,7 +35,7 @@ const SSH_FXP_STAT : u8 = 17;
 // Responses
 const SSH_FXP_STATUS : u8 = 101;
 const SSH_FXP_HANDLE : u8 = 102;
-//const SSH_FXP_DATA : u8 = 103;
+const SSH_FXP_DATA : u8 = 103;
 //const SSH_FXP_NAME : u8 = 104;
 const SSH_FXP_ATTRS : u8 = 105;
 //const SSH_FXP_EXTENDED : u8 = 200;
@@ -67,6 +68,7 @@ pub enum SftpResponsePacket {
     Version(FxpVersion),
     Status(FxpStatus),
     Handle(FxpHandle),
+    Data(FxpData),
     Attrs(FileAttr),
     Unknown{msg_type: u8, data: Vec<u8>},
 }
@@ -298,6 +300,28 @@ impl Sendable for FxpClose {
 }
 
 #[derive(Debug)]
+pub struct FxpRead {
+    pub handle: Vec<u8>,
+    pub offset: u64,
+    pub len: u32,
+}
+
+impl Request for FxpRead {
+    fn msg_type() -> u8 { SSH_FXP_READ }
+}
+
+impl Sendable for FxpRead {
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
+        let mut n = 0;
+        n += try!(self.handle.write_to(w));
+        w.write_u64::<BigEndian>(self.offset);
+        n += 8;
+        w.write_u32::<BigEndian>(self.len);
+        Ok(n)
+    }
+}
+
+#[derive(Debug)]
 pub struct FxpFStat {
     pub handle : Vec<u8>
 }
@@ -360,17 +384,23 @@ const SSH_FX_OP_UNSUPPORTED : u32 = 8;
 
 
 #[derive(Debug)]
-pub enum FxpStatus {
-    Ok{msg: Vec<u8>},
-    EOF{msg: Vec<u8>},
-    NoSuchFile{msg: Vec<u8>},
-    PermissionDenied{msg: Vec<u8>},
-    Failure{msg: Vec<u8>},
-    BadMessage{msg: Vec<u8>},
-    NoConnection{msg: Vec<u8>},
-    ConnectionLost{msg: Vec<u8>},
-    OpUnsupported{msg: Vec<u8>},
-    UnknownCode{msg: Vec<u8>, data: Vec<u8>},
+pub enum FxpStatusCode {
+    Ok,
+    EOF,
+    NoSuchFile,
+    PermissionDenied,
+    Failure,
+    BadMessage,
+    NoConnection,
+    ConnectionLost,
+    OpUnsupported,
+    UnknownCode(Vec<u8>),
+}
+
+#[derive(Debug)]
+pub struct FxpStatus {
+    pub code: FxpStatusCode,
+    pub msg: String,
 }
 
 impl Response for FxpStatus {
@@ -379,26 +409,51 @@ impl Response for FxpStatus {
 
 impl Receivable for FxpStatus {
     fn recv<R: io::Read>(r: &mut io::Take<R>) -> Result<FxpStatus> {
-        let code = try!(r.read_u32::<BigEndian>());
+        let icode = try!(r.read_u32::<BigEndian>());
         let msg = try!(Vec::<u8>::recv(r));
         try!(Vec::<u8>::recv(r));  // Skip lang
-
-        match code {
-            SSH_FX_OK => Ok(FxpStatus::Ok{msg: msg}),
-            SSH_FX_EOF => Ok(FxpStatus::EOF{msg: msg}),
-            SSH_FX_NO_SUCH_FILE => Ok(FxpStatus::NoSuchFile{msg: msg}),
-            SSH_FX_PERMISSION_DENIED => Ok(FxpStatus::PermissionDenied{msg: msg}),
-            SSH_FX_FAILURE => Ok(FxpStatus::Failure{msg: msg}),
-            SSH_FX_BAD_MESSAGE => Ok(FxpStatus::BadMessage{msg: msg}),
-            SSH_FX_NO_CONNECTION => Ok(FxpStatus::NoConnection{msg: msg}),
-            SSH_FX_CONNECTION_LOST => Ok(FxpStatus::ConnectionLost{msg: msg}),
-            SSH_FX_OP_UNSUPPORTED => Ok(FxpStatus::OpUnsupported{msg: msg}),
+        let code = match icode {
+            SSH_FX_OK => FxpStatusCode::Ok,
+            SSH_FX_EOF => FxpStatusCode::EOF,
+            SSH_FX_NO_SUCH_FILE => FxpStatusCode::NoSuchFile,
+            SSH_FX_PERMISSION_DENIED => FxpStatusCode::PermissionDenied,
+            SSH_FX_FAILURE => FxpStatusCode::Failure,
+            SSH_FX_BAD_MESSAGE => FxpStatusCode::BadMessage,
+            SSH_FX_NO_CONNECTION => FxpStatusCode::NoConnection,
+            SSH_FX_CONNECTION_LOST => FxpStatusCode::ConnectionLost,
+            SSH_FX_OP_UNSUPPORTED => FxpStatusCode::OpUnsupported,
             _ => {
                 let mut data = Vec::new();
                 try!(r.read_to_end(&mut data));
-                Ok(FxpStatus::UnknownCode{msg: msg, data: data})
+                FxpStatusCode::UnknownCode(data)
             },
-        }
+        };
+        Ok(FxpStatus{code: code, msg: try!(String::from_utf8(msg))})
+    }
+}
+
+impl StdError for FxpStatus {
+    fn description(&self) -> &str {
+        return self.msg.as_str();
+    }
+
+    fn cause(&self) -> Option<&StdError> { None }
+}
+
+impl fmt::Display for FxpStatus {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}: {}", self.code, self.msg)
+    }
+}
+
+impl From<FxpStatus> for io::Error {
+    fn from(err: FxpStatus) -> io::Error {
+        let ek = match err.code {
+            FxpStatusCode::NoSuchFile => io::ErrorKind::NotFound,
+            FxpStatusCode::PermissionDenied => io::ErrorKind::PermissionDenied,
+            _ => io::ErrorKind::Other,
+        };
+        io::Error::new(ek, err)
     }
 }
 
@@ -414,6 +469,21 @@ impl Response for FxpHandle {
 impl Receivable for FxpHandle {
     fn recv<R: io::Read>(r: &mut io::Take<R>) -> Result<FxpHandle> {
         Ok(FxpHandle{handle: try!(Vec::<u8>::recv(r))})
+    }
+}
+
+#[derive(Debug)]
+pub struct FxpData {
+    pub data: Vec<u8>,
+}
+
+impl Response for FxpData {
+    fn msg_type() -> u8 { SSH_FXP_DATA }
+}
+
+impl Receivable for FxpData {
+    fn recv<R: io::Read>(r: &mut io::Take<R>) -> Result<FxpData> {
+        Ok(FxpData{data: try!(Vec::<u8>::recv(r))})
     }
 }
 
@@ -440,6 +510,8 @@ pub fn recv<R : io::Read>(r: &mut R) -> Result<SftpResponse> {
         SftpResponsePacket::Status(try!(FxpStatus::recv(&mut lr)))
     } else if msg_type == SSH_FXP_HANDLE {
         SftpResponsePacket::Handle(try!(FxpHandle::recv(&mut lr)))
+    } else if msg_type == SSH_FXP_DATA {
+        SftpResponsePacket::Data(try!(FxpData::recv(&mut lr)))
     } else if msg_type == SSH_FXP_ATTRS {
         SftpResponsePacket::Attrs(try!(FileAttr::recv(&mut lr)))
     } else {

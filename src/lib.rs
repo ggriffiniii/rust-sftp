@@ -1,6 +1,7 @@
 #![crate_name = "sftp"]
 #![feature(convert)]
 #![feature(associated_consts)]
+#![feature(collections)]
 
 extern crate byteorder;
 
@@ -250,6 +251,27 @@ impl<W> Drop for File<W> where W : 'static + io::Write + Send {
     fn drop(&mut self) {
         let p = packets::FxpClose{handle: self.handle.clone()};
         self.client.send_receive(&p);
+    }
+}
+
+impl<W> io::Read for File<W> where W : 'static + io::Write + Send {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let p = packets::FxpRead{handle: self.handle.clone(),
+                                 offset: self.offset,
+                                 len: buf.len() as u32};
+        let resp = match self.client.send_receive(&p) {
+            Ok(data) => data,
+            Err(_) => return Err(io::Error::new(io::ErrorKind::Other, "unknown error")),
+        };
+        match resp {
+            packets::SftpResponsePacket::Data(mut data) => {
+                let n = buf.clone_from_slice(&mut data.data[..]);
+                self.offset += n as u64;
+                Ok(n)
+            },
+            packets::SftpResponsePacket::Status(packets::FxpStatus{code: packets::FxpStatusCode::EOF, msg: _}) => Ok(0),
+            x => Err(io::Error::new(io::ErrorKind::Other, "unknown error")), // TODO: do better
+        }
     }
 }
 

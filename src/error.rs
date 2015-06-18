@@ -6,6 +6,7 @@ use std::fmt;
 use std::io;
 use self::byteorder::Error as ByteError;
 use std::sync::Arc;
+use std::string::FromUtf8Error;
 
 use packets;
 
@@ -17,6 +18,7 @@ pub enum Error {
     Io(io::Error),
     UnexpectedData,
     UnexpectedEOF,
+    Utf8(FromUtf8Error),
     NoMatchingRequest(u32),
     MismatchedVersion(u32),
     UnexpectedResponse(Box<packets::SftpResponsePacket>),
@@ -37,13 +39,20 @@ impl From<ByteError> for Error {
     }
 }
 
+impl From<FromUtf8Error> for Error {
+    fn from(err: FromUtf8Error) -> Error {
+        Error::Utf8(err)
+    }
+}
+
 impl error::Error for Error {
     fn description(&self) -> &str {
         match *self {
-            Error::ReceiverDisconnected(ref e) => "Receiver disconnected.",
+            Error::ReceiverDisconnected(_) => "Receiver disconnected.",
             Error::Io(ref e) => e.description(),
             Error::UnexpectedData => "Unexpected data in message.",
             Error::UnexpectedEOF => "Unexpected EOF.",
+            Error::Utf8(ref e) => e.description(),
             Error::NoMatchingRequest(ref req_id) => "Response received with an unexpected request-id.",
             Error::MismatchedVersion(ref ver) => "Server responded with an incorrect version",
             Error::UnexpectedResponse(_) => "Unexpected response",
@@ -54,6 +63,7 @@ impl error::Error for Error {
         match *self {
             Error::ReceiverDisconnected(ref e) => Some(&***e),
             Error::Io(ref err) => err.cause(),
+            Error::Utf8(ref err) => err.cause(),
             _ => None,
         }
     }
@@ -62,10 +72,11 @@ impl error::Error for Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            Error::ReceiverDisconnected(ref e) => write!(f, "Receiver disconnected."),
-            Error::Io(ref e) => e.fmt(f),
+            Error::ReceiverDisconnected(_) => write!(f, "Receiver disconnected."),
+            Error::Io(ref err) => err.fmt(f),
             Error::UnexpectedData => write!(f, "Unexpected data in message."),
             Error::UnexpectedEOF => write!(f, "Unexpected EOF."),
+            Error::Utf8(ref err) => err.fmt(f),
             Error::NoMatchingRequest(ref req_id) => write!(f, "Response received with an unexpected request-id: {}", req_id),
             Error::MismatchedVersion(ref ver) => write!(f, "Server responded with version {}. Only version 3 is supported.", ver),
             Error::UnexpectedResponse(_) => write!(f, "Unexpected response"),
