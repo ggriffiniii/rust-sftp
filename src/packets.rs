@@ -16,7 +16,7 @@ const SSH_FXP_VERSION : u8 = 2;
 const SSH_FXP_OPEN : u8 = 3;
 const SSH_FXP_CLOSE : u8 = 4;
 const SSH_FXP_READ : u8 = 5;
-//const SSH_FXP_WRITE : u8 = 6;
+const SSH_FXP_WRITE : u8 = 6;
 //const SSH_FXP_LSTAT : u8 = 7;
 const SSH_FXP_FSTAT : u8 = 8;
 //const SSH_FXP_SETSTAT : u8 = 9;
@@ -317,6 +317,28 @@ impl Sendable for FxpRead {
         w.write_u64::<BigEndian>(self.offset);
         n += 8;
         w.write_u32::<BigEndian>(self.len);
+        Ok(n)
+    }
+}
+
+#[derive(Debug)]
+pub struct FxpWrite {
+    pub handle: Vec<u8>,
+    pub offset: u64,
+    pub data: Vec<u8>,
+}
+
+impl Request for FxpWrite {
+    fn msg_type() -> u8 { SSH_FXP_WRITE }
+}
+
+impl Sendable for FxpWrite {
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
+        let mut n = 0;
+        n += try!(self.handle.write_to(w));
+        w.write_u64::<BigEndian>(self.offset);
+        n += 8;
+        n += try!(self.data.write_to(w));
         Ok(n)
     }
 }

@@ -134,9 +134,37 @@ fn can_read() {
     {
         let mut client = sftp::Client::new(r, w).unwrap();
         let mut remote_file = client.open_options().read(true).open(tempfile.path()).unwrap();
-        let mut remote_contents = String::new();
-        remote_file.read_to_string(&mut remote_contents).unwrap();
-        assert_eq!(contents, remote_contents);
+        let mut remote_contents = vec![0,0,0,0];
+        let n = remote_file.read(&mut remote_contents[..]).unwrap();
+        assert_eq!(4, n);
+        remote_file.read_to_end(&mut remote_contents).unwrap();
+        assert_eq!(contents, String::from_utf8(remote_contents).unwrap());
     }
     server.wait().unwrap();
+}
+
+#[test]
+fn can_write() {
+    const contents : &'static str = "tempfile contents";
+    let mut tempfile = TempFile::new();
+    let mut server = new_test_sftp_server().unwrap();
+    //let r = DebugReader{inner: server.stdout.take().unwrap()};
+    //let w = DebugWriter{inner: server.stdin.take().unwrap()};
+    let r = server.stdout.take().unwrap();
+    let w = server.stdin.take().unwrap();
+    {
+        let mut client = sftp::Client::new(r, w).unwrap();
+        let mut remote_file = client.open_options().write(true).open(tempfile.path()).unwrap();
+        remote_file.write_all(contents.as_bytes()).unwrap();
+        remote_file.write_all(contents.as_bytes()).unwrap();
+    }
+    server.wait().unwrap();
+    let mut tempfile_contents = String::new();
+    tempfile.read_to_string(&mut tempfile_contents).unwrap();
+    let expected = {
+        let mut x = String::from(contents);
+        x.push_str(contents);
+        x
+    };
+    assert_eq!(expected, tempfile_contents);
 }

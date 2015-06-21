@@ -275,6 +275,24 @@ impl<W> io::Read for File<W> where W : 'static + io::Write + Send {
     }
 }
 
+impl<W> io::Write for File<W> where W : 'static + io::Write + Send {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let p = packets::FxpWrite{handle: self.handle.clone(),
+                                  offset: self.offset,
+                                  data: buf.into()};
+        let resp = match self.client.send_receive(&p) {
+            Ok(data) => data,
+            Err(_) => return Err(io::Error::new(io::ErrorKind::Other, "unknown error")),
+        };
+        match resp {
+            packets::SftpResponsePacket::Status(packets::FxpStatus{code: packets::FxpStatusCode::Ok, msg: _}) => { self.offset += p.data.len() as u64; Ok(p.data.len()) },
+            _ => Err(io::Error::new(io::ErrorKind::Other, "unknown error")),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> { Ok(()) }
+}
+
 impl<W> io::Seek for File<W> where W : 'static + io::Write + Send {
     fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
         let soffset = self.offset as i64;
