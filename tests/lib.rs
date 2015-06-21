@@ -74,24 +74,6 @@ fn new_test_sftp_server() -> io::Result<process::Child> {
 }
 
 #[test]
-fn it_works() {
-	let mut server = new_test_sftp_server().unwrap();
-	{
-        //let r = DebugReader{inner: server.stdout.take().unwrap()};
-        //let w = DebugWriter{inner: server.stdin.take().unwrap()};
-        let r = server.stdout.take().unwrap();
-        let w = server.stdin.take().unwrap();
-		let mut client = sftp::Client::new(r, w).unwrap();
-        let attr = client.stat("/".to_string()).unwrap();
-        let size = attr.size.unwrap();
-        let file = client.open_options().read(true).open("/tmp/foo".to_string()).unwrap();
-        assert!(size == 4096);
-        
-	}
-	server.wait().unwrap();
-}
-
-#[test]
 fn is_send() {
     let mut tempfile1 = TempFile::new();
     let mut tempfile2 = TempFile::new();
@@ -118,6 +100,24 @@ fn is_send() {
         t2.join()
     });
     t1.join().unwrap().unwrap();
+    server.wait().unwrap();
+}
+
+#[test]
+fn can_stat() {
+    const contents : &'static str = "tempfile contents";
+    let mut tempfile = TempFile::new();
+    tempfile.write_all(contents.as_bytes()).unwrap();
+    let mut server = new_test_sftp_server().unwrap();
+    //let r = DebugReader{inner: server.stdout.take().unwrap()};
+    //let w = DebugWriter{inner: server.stdin.take().unwrap()};
+    let r = server.stdout.take().unwrap();
+    let w = server.stdin.take().unwrap();
+    {
+        let mut client = sftp::Client::new(r, w).unwrap();
+        let result = client.stat(tempfile.path()).unwrap();
+        assert_eq!(contents.len() as u64, result.size.unwrap());
+    }
     server.wait().unwrap();
 }
 
