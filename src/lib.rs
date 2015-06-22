@@ -202,6 +202,12 @@ impl<W> Client<W> where W : 'static + io::Write + Send {
         }
     }
 
+    pub fn rename(&mut self, oldpath: String, newpath: String) -> Result<()> {
+        let p = packets::FxpRename{oldpath: oldpath.into_bytes(), newpath: newpath.into_bytes()};
+        let resp = try!(self.sender.send_receive(&p));
+        Client::<W>::expect_status_response(resp)
+    }
+
     pub fn open_options(&mut self) -> OpenOptions<W> {
         OpenOptions{client: self, flags: 0}
     }

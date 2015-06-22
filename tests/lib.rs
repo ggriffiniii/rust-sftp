@@ -326,3 +326,24 @@ fn can_realpath() {
     }
     server.wait().unwrap();
 }
+
+#[test]
+fn can_rename() {
+    let mut tempfile = TempFile::new();
+    let newpath = TempFile::new().path();
+    let mut server = new_test_sftp_server().unwrap();
+    //let r = DebugReader{inner: server.stdout.take().unwrap()};
+    //let w = DebugWriter{inner: server.stdin.take().unwrap()};
+    let r = server.stdout.take().unwrap();
+    let w = server.stdin.take().unwrap();
+    {
+        let mut client = sftp::Client::new(r, w).unwrap();
+        match std::fs::metadata(&newpath) {
+            Ok(_) => panic!("file already exists: {}", &newpath),
+            _ => {},
+        }
+        client.rename(tempfile.path(), newpath.clone()).unwrap();
+        std::fs::metadata(&newpath).unwrap();
+    }
+    server.wait().unwrap();
+}
