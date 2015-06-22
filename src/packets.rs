@@ -19,8 +19,8 @@ const SSH_FXP_READ : u8 = 5;
 const SSH_FXP_WRITE : u8 = 6;
 const SSH_FXP_LSTAT : u8 = 7;
 const SSH_FXP_FSTAT : u8 = 8;
-//const SSH_FXP_SETSTAT : u8 = 9;
-//const SSH_FXP_FSETSTAT : u8 = 10;
+const SSH_FXP_SETSTAT : u8 = 9;
+const SSH_FXP_FSETSTAT : u8 = 10;
 //const SSH_FXP_OPENDIR : u8 = 11;
 //const SSH_FXP_READDIR : u8 = 12;
 const SSH_FXP_REMOVE : u8 = 13;
@@ -155,19 +155,19 @@ impl Sendable for FileAttr {
     fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
         let mut flags : u32 = 0;
         if self.size.is_some() {
-            flags &= SSH_FILEXFER_ATTR_SIZE;
+            flags |= SSH_FILEXFER_ATTR_SIZE;
         }
         if self.uid.is_some() && self.gid.is_some() {
-            flags &= SSH_FILEXFER_ATTR_UIDGID;
+            flags |= SSH_FILEXFER_ATTR_UIDGID;
         }
         if self.perms.is_some() {
-            flags &= SSH_FILEXFER_ATTR_PERMISSIONS;
+            flags |= SSH_FILEXFER_ATTR_PERMISSIONS;
         }
         if self.atime.is_some() && self.mtime.is_some() {
-            flags &= SSH_FILEXFER_ATTR_ACMODTIME;
+            flags |= SSH_FILEXFER_ATTR_ACMODTIME;
         }
         if self.extensions.len() > 0 {
-            flags &= SSH_FILEXFER_ATTR_EXTENDED;
+            flags |= SSH_FILEXFER_ATTR_EXTENDED;
         }
         let mut n : usize = 0;
         try!(w.write_u32::<BigEndian>(flags));
@@ -370,6 +370,42 @@ impl Request for FxpFStat {
 impl Sendable for FxpFStat {
     fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
         Ok(try!(self.handle.write_to(w)))
+    }
+}
+
+#[derive(Debug)]
+pub struct FxpSetStat {
+    pub path : Vec<u8>,
+    pub attrs : FileAttr,
+}
+
+impl Request for FxpSetStat {
+    fn msg_type() -> u8 { SSH_FXP_SETSTAT }
+}
+
+impl Sendable for FxpSetStat {
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
+        let mut n = try!(self.path.write_to(w));
+        n += try!(self.attrs.write_to(w));
+        Ok(n)
+    }
+}
+
+#[derive(Debug)]
+pub struct FxpFSetStat {
+    pub handle : Vec<u8>,
+    pub attrs : FileAttr,
+}
+
+impl Request for FxpFSetStat {
+    fn msg_type() -> u8 { SSH_FXP_FSETSTAT }
+}
+
+impl Sendable for FxpFSetStat {
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
+        let mut n = try!(self.handle.write_to(w));
+        n += try!(self.attrs.write_to(w));
+        Ok(n)
     }
 }
 

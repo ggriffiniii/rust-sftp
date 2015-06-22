@@ -2,6 +2,7 @@
 #![feature(convert)]
 #![feature(associated_consts)]
 #![feature(collections)]
+#![feature(clone_from_slice)]
 
 extern crate byteorder;
 
@@ -18,6 +19,8 @@ use std::thread;
 use std::sync::{Arc, Mutex, MutexGuard, atomic};
 use std::collections::HashMap;
 use std::sync::mpsc;
+
+pub use packets::FileAttr;
 
 type ReqId = u32;
 type ReqMap = HashMap<ReqId, mpsc::Sender<Result<packets::SftpResponsePacket>>>;
@@ -166,6 +169,12 @@ impl<W> Client<W> where W : 'static + io::Write + Send {
         }
     }
 
+    pub fn setstat(&mut self, path: String, attrs: packets::FileAttr) -> Result<()> {
+        let p = packets::FxpSetStat{path: path.into_bytes(), attrs: attrs};
+        let resp = try!(self.sender.send_receive(&p));
+        Client::<W>::expect_status_response(resp)
+    }
+
     pub fn mkdir(&mut self, path: String) -> Result<()> {
         let p = packets::FxpMkDir{path: path.into_bytes(), attrs: packets::FileAttr::new()};
         let resp = try!(self.sender.send_receive(&p));
@@ -279,6 +288,12 @@ impl<W> File<W>  where W : 'static + io::Write + Send {
             },
             x => Err(error::Error::UnexpectedResponse(Box::new(x)))
         }
+    }
+
+    pub fn setstat(&mut self, attrs: packets::FileAttr) -> Result<()> {
+        let p = packets::FxpFSetStat{handle: self.handle.clone(), attrs: attrs};
+        let resp = try!(self.client.send_receive(&p));
+        Client::<W>::expect_status_response(resp)
     }
 }
 

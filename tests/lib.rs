@@ -9,6 +9,7 @@ use std::thread;
 use std::io;
 use std::io::Read;
 use std::io::Write;
+use std::os::unix::fs::MetadataExt;
 
 struct TempFile {
     file: tempfile::NamedTempFile,
@@ -84,6 +85,8 @@ fn new_test_sftp_server() -> io::Result<process::Child> {
     };
 	process::Command::new(sftp_cmd)
         .arg("-e")
+        //.arg("-l")
+        //.arg("DEBUG")
 		.stdin(process::Stdio::piped())
 		.stdout(process::Stdio::piped())
 		.stderr(process::Stdio::inherit())
@@ -263,6 +266,47 @@ fn can_rmdir() {
             Ok(_) => panic!("directory still exists: {}", tempfile_path),
             Err(_) => {},
         }
+    }
+    server.wait().unwrap();
+}
+
+#[test]
+fn can_setstat() {
+    let mut tempfile = TempFile::new();
+    let mut server = new_test_sftp_server().unwrap();
+    //let r = DebugReader{inner: server.stdout.take().unwrap()};
+    //let w = DebugWriter{inner: server.stdin.take().unwrap()};
+    let r = server.stdout.take().unwrap();
+    let w = server.stdin.take().unwrap();
+    {
+        let mut client = sftp::Client::new(r, w).unwrap();
+        let mut new_attrs = sftp::FileAttr::new();
+        new_attrs.mtime = Some(0);
+        new_attrs.atime = Some(0);
+        client.setstat(tempfile.path(), new_attrs).unwrap();
+        let mtime = std::fs::metadata(tempfile.path()).unwrap().mtime();
+        assert_eq!(0, mtime);
+    }
+    server.wait().unwrap();
+}
+
+#[test]
+fn can_fsetstat() {
+    let mut tempfile = TempFile::new();
+    let mut server = new_test_sftp_server().unwrap();
+    //let r = DebugReader{inner: server.stdout.take().unwrap()};
+    //let w = DebugWriter{inner: server.stdin.take().unwrap()};
+    let r = server.stdout.take().unwrap();
+    let w = server.stdin.take().unwrap();
+    {
+        let mut client = sftp::Client::new(r, w).unwrap();
+        let mut new_attrs = sftp::FileAttr::new();
+        new_attrs.mtime = Some(0);
+        new_attrs.atime = Some(0);
+        let mut file = client.open_options().read(true).open(tempfile.path()).unwrap();
+        file.setstat(new_attrs).unwrap();
+        let mtime = std::fs::metadata(tempfile.path()).unwrap().mtime();
+        assert_eq!(0, mtime);
     }
     server.wait().unwrap();
 }
