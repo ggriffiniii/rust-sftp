@@ -29,7 +29,7 @@ const SSH_FXP_RMDIR : u8 = 15;
 const SSH_FXP_REALPATH : u8 = 16;
 const SSH_FXP_STAT : u8 = 17;
 const SSH_FXP_RENAME : u8 = 18;
-//const SSH_FXP_READLINK : u8 = 19;
+const SSH_FXP_READLINK : u8 = 19;
 //const SSH_FXP_SYMLINK : u8 = 20;
 
 // Responses
@@ -503,6 +503,21 @@ impl Sendable for FxpRename {
         let mut n = try!(self.oldpath.write_to(w));
         n += try!(self.newpath.write_to(w));
         Ok(n)
+    }
+}
+
+#[derive(Debug)]
+pub struct FxpReadLink {
+    pub path : Vec<u8>
+}
+
+impl Request for FxpReadLink {
+    fn msg_type() -> u8 { SSH_FXP_READLINK }
+}
+
+impl Sendable for FxpReadLink {
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
+        Ok(try!(self.path.write_to(w)))
     }
 }
 

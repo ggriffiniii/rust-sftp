@@ -347,3 +347,22 @@ fn can_rename() {
     }
     server.wait().unwrap();
 }
+
+#[test]
+fn can_readlink() {
+    const LINK_TARGET : &'static str = "/tmp/foobar";
+    let mut linkpath = TempFile::new().path();
+    std::os::unix::fs::symlink(LINK_TARGET, &linkpath).unwrap();
+    let mut server = new_test_sftp_server().unwrap();
+    //let r = DebugReader{inner: server.stdout.take().unwrap()};
+    //let w = DebugWriter{inner: server.stdin.take().unwrap()};
+    let r = server.stdout.take().unwrap();
+    let w = server.stdin.take().unwrap();
+    {
+        let mut client = sftp::Client::new(r, w).unwrap();
+        let dst = client.readlink(linkpath.clone()).unwrap();
+        assert_eq!(LINK_TARGET.as_bytes(), dst.filename.as_slice());
+    }
+    //std::fs::remove_file(linkpath);
+    server.wait().unwrap();
+}
