@@ -222,3 +222,47 @@ fn can_remove() {
     }
     server.wait().unwrap();
 }
+
+#[test]
+fn can_mkdir() {
+    let mut tempfile_path = TempFile::new().path();
+    let mut server = new_test_sftp_server().unwrap();
+    //let r = DebugReader{inner: server.stdout.take().unwrap()};
+    //let w = DebugWriter{inner: server.stdin.take().unwrap()};
+    let r = server.stdout.take().unwrap();
+    let w = server.stdin.take().unwrap();
+    {
+        let mut client = sftp::Client::new(r, w).unwrap();
+        match std::fs::metadata(&tempfile_path) {
+            Ok(_) => panic!("file already exists: {}", &tempfile_path),
+            _ => {},
+        }
+        client.mkdir(tempfile_path.clone()).unwrap();
+        match std::fs::metadata(&tempfile_path) {
+            Ok(metadata) => assert!(metadata.is_dir()),
+            Err(x) => panic!("unable to stat directory {}: {:?}", &tempfile_path, x),
+        }
+        std::fs::remove_dir(&tempfile_path);
+    }
+    server.wait().unwrap();
+}
+
+#[test]
+fn can_rmdir() {
+    let mut tempfile_path = TempFile::new().path();
+    let mut server = new_test_sftp_server().unwrap();
+    //let r = DebugReader{inner: server.stdout.take().unwrap()};
+    //let w = DebugWriter{inner: server.stdin.take().unwrap()};
+    let r = server.stdout.take().unwrap();
+    let w = server.stdin.take().unwrap();
+    {
+        let mut client = sftp::Client::new(r, w).unwrap();
+        std::fs::create_dir(&tempfile_path).unwrap();
+        client.rmdir(tempfile_path.clone()).unwrap();
+        match std::fs::metadata(&tempfile_path) {
+            Ok(_) => panic!("directory still exists: {}", tempfile_path),
+            Err(_) => {},
+        }
+    }
+    server.wait().unwrap();
+}

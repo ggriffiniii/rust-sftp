@@ -166,6 +166,18 @@ impl<W> Client<W> where W : 'static + io::Write + Send {
         }
     }
 
+    pub fn mkdir(&mut self, path: String) -> Result<()> {
+        let p = packets::FxpMkDir{path: path.into_bytes(), attrs: packets::FileAttr::new()};
+        let resp = try!(self.sender.send_receive(&p));
+        Client::<W>::expect_status_response(resp)
+    }
+
+    pub fn rmdir(&mut self, path: String) -> Result<()> {
+        let p = packets::FxpRmDir{path: path.into_bytes()};
+        let resp = try!(self.sender.send_receive(&p));
+        Client::<W>::expect_status_response(resp)
+    }
+
     pub fn open_options(&mut self) -> OpenOptions<W> {
         OpenOptions{client: self, flags: 0}
     }
@@ -188,6 +200,10 @@ impl<W> Client<W> where W : 'static + io::Write + Send {
     pub fn remove(&mut self, filename: String) -> Result<()> {
         let p = packets::FxpRemove{filename: filename.into_bytes()};
         let resp = try!(self.sender.send_receive(&p));
+        Client::<W>::expect_status_response(resp)
+    }
+
+    fn expect_status_response(resp : packets::SftpResponsePacket) -> Result<()> {
         match resp {
             packets::SftpResponsePacket::Status(packets::FxpStatus{code:
                 packets::FxpStatusCode::Ok, msg: _}) => Ok(()),
