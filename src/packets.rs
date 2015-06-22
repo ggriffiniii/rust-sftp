@@ -30,6 +30,8 @@ const SSH_FXP_REALPATH : u8 = 16;
 const SSH_FXP_STAT : u8 = 17;
 const SSH_FXP_RENAME : u8 = 18;
 const SSH_FXP_READLINK : u8 = 19;
+// SSH_FXP_SYMLINK is not implemented because openssh sftp server reversed the order of the
+// arguments, making it incompatible with the rfc and other implementations.
 //const SSH_FXP_SYMLINK : u8 = 20;
 
 // Responses
