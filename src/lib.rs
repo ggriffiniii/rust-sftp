@@ -187,6 +187,21 @@ impl<W> Client<W> where W : 'static + io::Write + Send {
         Client::<W>::expect_status_response(resp)
     }
 
+    pub fn realpath(&mut self, path: String) -> Result<packets::Name> {
+        let p = packets::FxpRealPath{path: path.into_bytes()};
+        let resp = try!(self.sender.send_receive(&p));
+        match resp {
+            packets::SftpResponsePacket::Name(mut name) => {
+                if let Some(name) = name.names.pop() {
+                    Ok(name)
+                } else {
+                    Err(error::Error::UnexpectedResponse(Box::new(packets::SftpResponsePacket::Name(name))))
+                }
+            },
+            x => Err(error::Error::UnexpectedResponse(Box::new(x))),
+        }
+    }
+
     pub fn open_options(&mut self) -> OpenOptions<W> {
         OpenOptions{client: self, flags: 0}
     }

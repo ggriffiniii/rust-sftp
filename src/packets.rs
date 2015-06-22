@@ -26,7 +26,7 @@ const SSH_FXP_FSETSTAT : u8 = 10;
 const SSH_FXP_REMOVE : u8 = 13;
 const SSH_FXP_MKDIR : u8 = 14;
 const SSH_FXP_RMDIR : u8 = 15;
-//const SSH_FXP_REALPATH : u8 = 16;
+const SSH_FXP_REALPATH : u8 = 16;
 const SSH_FXP_STAT : u8 = 17;
 //const SSH_FXP_RENAME : u8 = 18;
 //const SSH_FXP_READLINK : u8 = 19;
@@ -36,7 +36,7 @@ const SSH_FXP_STAT : u8 = 17;
 const SSH_FXP_STATUS : u8 = 101;
 const SSH_FXP_HANDLE : u8 = 102;
 const SSH_FXP_DATA : u8 = 103;
-//const SSH_FXP_NAME : u8 = 104;
+const SSH_FXP_NAME : u8 = 104;
 const SSH_FXP_ATTRS : u8 = 105;
 //const SSH_FXP_EXTENDED : u8 = 200;
 //const SSH_FXP_EXTENDED_REPLY : u8 = 201;
@@ -69,6 +69,7 @@ pub enum SftpResponsePacket {
     Status(FxpStatus),
     Handle(FxpHandle),
     Data(FxpData),
+    Name(FxpName),
     Attrs(FileAttr),
     Unknown{msg_type: u8, data: Vec<u8>},
 }
@@ -458,6 +459,21 @@ impl Sendable for FxpRmDir {
 }
 
 #[derive(Debug)]
+pub struct FxpRealPath {
+    pub path : Vec<u8>
+}
+
+impl Request for FxpRealPath {
+    fn msg_type() -> u8 { SSH_FXP_REALPATH }
+}
+
+impl Sendable for FxpRealPath {
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
+        Ok(try!(self.path.write_to(w)))
+    }
+}
+
+#[derive(Debug)]
 pub struct FxpStat {
     pub path : Vec<u8>
 }
@@ -608,6 +624,42 @@ impl Receivable for FxpData {
     }
 }
 
+#[derive(Debug)]
+pub struct Name {
+    pub filename: Vec<u8>,
+    pub longname: Vec<u8>,
+    pub attrs: FileAttr,
+}
+
+impl Receivable for Name {
+    fn recv<R: io::Read>(r: &mut io::Take<R>) -> Result<Name> {
+        let filename = try!(Vec::<u8>::recv(r));
+        let longname = try!(Vec::<u8>::recv(r));
+        let attrs = try!(FileAttr::recv(r));
+        Ok(Name{filename: filename, longname: longname, attrs: attrs})
+    }
+}
+
+#[derive(Debug)]
+pub struct FxpName {
+    pub names: Vec<Name>,
+}
+
+impl Response for FxpName {
+    fn msg_type() -> u8 { SSH_FXP_NAME }
+}
+
+impl Receivable for FxpName {
+    fn recv<R: io::Read>(r: &mut io::Take<R>) -> Result<FxpName> {
+        let count = try!(r.read_u32::<BigEndian>());
+        let mut names = Vec::new();
+        for _ in 0..count {
+            names.push(try!(Name::recv(r)));
+        }
+        Ok(FxpName{names: names})
+    }
+}
+
 pub fn recv<R : io::Read>(r: &mut R) -> Result<SftpResponse> {
     let l = try!(r.read_u32::<BigEndian>());
     let mut lr = r.take(l as u64);
@@ -633,6 +685,8 @@ pub fn recv<R : io::Read>(r: &mut R) -> Result<SftpResponse> {
         SftpResponsePacket::Handle(try!(FxpHandle::recv(&mut lr)))
     } else if msg_type == SSH_FXP_DATA {
         SftpResponsePacket::Data(try!(FxpData::recv(&mut lr)))
+    } else if msg_type == SSH_FXP_NAME {
+        SftpResponsePacket::Name(try!(FxpName::recv(&mut lr)))
     } else if msg_type == SSH_FXP_ATTRS {
         SftpResponsePacket::Attrs(try!(FileAttr::recv(&mut lr)))
     } else {

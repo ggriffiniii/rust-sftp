@@ -310,3 +310,19 @@ fn can_fsetstat() {
     }
     server.wait().unwrap();
 }
+
+#[test]
+fn can_realpath() {
+    let mut tempfile = TempFile::new();
+    let mut server = new_test_sftp_server().unwrap();
+    //let r = DebugReader{inner: server.stdout.take().unwrap()};
+    //let w = DebugWriter{inner: server.stdin.take().unwrap()};
+    let r = server.stdout.take().unwrap();
+    let w = server.stdin.take().unwrap();
+    {
+        let mut client = sftp::Client::new(r, w).unwrap();
+        let name = client.realpath(tempfile.path()).unwrap();
+        assert_eq!(tempfile.path().into_bytes(), name.filename);
+    }
+    server.wait().unwrap();
+}
