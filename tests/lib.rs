@@ -12,15 +12,32 @@ use std::io::Write;
 
 struct TempFile {
     file: tempfile::NamedTempFile,
+    links: Vec<String>,
 }
 
 impl TempFile {
     fn new() -> TempFile {
-        TempFile{file: tempfile::NamedTempFile::new().unwrap()}
+        TempFile{file: tempfile::NamedTempFile::new().unwrap(), links: Vec::new()}
     }
 
     fn path(&self) -> String {
         From::from(self.file.path().to_str().unwrap())
+    }
+
+    fn symlink(&mut self) -> String {
+        let link_path =
+            tempfile::NamedTempFile::new().unwrap().path().to_str().unwrap().to_string();
+        std::fs::soft_link(self.path(), &link_path).unwrap();
+        self.links.push(link_path.clone());
+        link_path
+    }
+}
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        for path in self.links.iter() {
+            std::fs::remove_file(path);
+        }
     }
 }
 
@@ -122,6 +139,26 @@ fn can_stat() {
 }
 
 #[test]
+fn can_lstat() {
+    const contents : &'static str = "tempfile contents";
+    let mut tempfile = TempFile::new();
+    tempfile.write_all(contents.as_bytes()).unwrap();
+    let link = tempfile.symlink();
+    let mut server = new_test_sftp_server().unwrap();
+    //let r = DebugReader{inner: server.stdout.take().unwrap()};
+    //let w = DebugWriter{inner: server.stdin.take().unwrap()};
+    let r = server.stdout.take().unwrap();
+    let w = server.stdin.take().unwrap();
+    {
+        let mut client = sftp::Client::new(r, w).unwrap();
+        let lresult = client.lstat(link).unwrap();
+        let result = client.stat(tempfile.path()).unwrap();
+        assert!(lresult.size.unwrap() != result.size.unwrap());
+    }
+    server.wait().unwrap();
+}
+
+#[test]
 fn can_read() {
     const contents : &'static str = "tempfile contents";
     let mut tempfile = TempFile::new();
@@ -167,4 +204,21 @@ fn can_write() {
         x
     };
     assert_eq!(expected, tempfile_contents);
+}
+
+#[test]
+fn can_remove() {
+    let mut tempfile = TempFile::new();
+    let mut server = new_test_sftp_server().unwrap();
+    //let r = DebugReader{inner: server.stdout.take().unwrap()};
+    //let w = DebugWriter{inner: server.stdin.take().unwrap()};
+    let r = server.stdout.take().unwrap();
+    let w = server.stdin.take().unwrap();
+    {
+        let mut client = sftp::Client::new(r, w).unwrap();
+        // assert tempfile exists
+        client.remove(tempfile.path()).unwrap();
+        // assert tempfile no longer exists
+    }
+    server.wait().unwrap();
 }

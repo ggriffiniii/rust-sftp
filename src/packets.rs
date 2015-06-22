@@ -17,13 +17,13 @@ const SSH_FXP_OPEN : u8 = 3;
 const SSH_FXP_CLOSE : u8 = 4;
 const SSH_FXP_READ : u8 = 5;
 const SSH_FXP_WRITE : u8 = 6;
-//const SSH_FXP_LSTAT : u8 = 7;
+const SSH_FXP_LSTAT : u8 = 7;
 const SSH_FXP_FSTAT : u8 = 8;
 //const SSH_FXP_SETSTAT : u8 = 9;
 //const SSH_FXP_FSETSTAT : u8 = 10;
 //const SSH_FXP_OPENDIR : u8 = 11;
 //const SSH_FXP_READDIR : u8 = 12;
-//const SSH_FXP_REMOVE : u8 = 13;
+const SSH_FXP_REMOVE : u8 = 13;
 //const SSH_FXP_MKDIR : u8 = 14;
 //const SSH_FXP_RMDIR : u8 = 15;
 //const SSH_FXP_REALPATH : u8 = 16;
@@ -344,6 +344,21 @@ impl Sendable for FxpWrite {
 }
 
 #[derive(Debug)]
+pub struct FxpLStat {
+    pub path : Vec<u8>
+}
+
+impl Request for FxpLStat {
+    fn msg_type() -> u8 { SSH_FXP_LSTAT }
+}
+
+impl Sendable for FxpLStat {
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
+        Ok(try!(self.path.write_to(w)))
+    }
+}
+
+#[derive(Debug)]
 pub struct FxpFStat {
     pub handle : Vec<u8>
 }
@@ -355,6 +370,21 @@ impl Request for FxpFStat {
 impl Sendable for FxpFStat {
     fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
         Ok(try!(self.handle.write_to(w)))
+    }
+}
+
+#[derive(Debug)]
+pub struct FxpRemove {
+    pub filename : Vec<u8>
+}
+
+impl Request for FxpRemove {
+    fn msg_type() -> u8 { SSH_FXP_REMOVE }
+}
+
+impl Sendable for FxpRemove {
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
+        Ok(try!(self.filename.write_to(w)))
     }
 }
 

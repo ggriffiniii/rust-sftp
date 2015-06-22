@@ -148,6 +148,15 @@ impl<W> Client<W> where W : 'static + io::Write + Send {
 
     pub fn stat(&mut self, path: String) -> Result<packets::FileAttr> {
         let p = packets::FxpStat{path: path.into_bytes()};
+        self.do_stat(p)
+    }
+
+    pub fn lstat(&mut self, path: String) -> Result<packets::FileAttr> {
+        let p = packets::FxpLStat{path: path.into_bytes()};
+        self.do_stat(p)
+    }
+
+    fn do_stat<T : packets::Request>(&mut self, p: T) -> Result<packets::FileAttr> {
         let resp = try!(self.sender.send_receive(&p));
         match resp {
             packets::SftpResponsePacket::Attrs(attrs) => {
@@ -172,6 +181,16 @@ impl<W> Client<W> where W : 'static + io::Write + Send {
             packets::SftpResponsePacket::Handle(handle) => {
                 Ok(File{client: self.sender.clone(), handle: handle.handle, offset: 0})
             },
+            x => Err(error::Error::UnexpectedResponse(Box::new(x))),
+        }
+    }
+
+    pub fn remove(&mut self, filename: String) -> Result<()> {
+        let p = packets::FxpRemove{filename: filename.into_bytes()};
+        let resp = try!(self.sender.send_receive(&p));
+        match resp {
+            packets::SftpResponsePacket::Status(packets::FxpStatus{code:
+                packets::FxpStatusCode::Ok, msg: _}) => Ok(()),
             x => Err(error::Error::UnexpectedResponse(Box::new(x))),
         }
     }
