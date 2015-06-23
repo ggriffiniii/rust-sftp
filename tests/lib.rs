@@ -2,7 +2,9 @@
 
 extern crate sftp;
 extern crate tempfile;
+extern crate tempdir;
 
+use std::collections::HashMap;
 use std::convert::From;
 use std::process;
 use std::thread;
@@ -10,6 +12,7 @@ use std::io;
 use std::io::Read;
 use std::io::Write;
 use std::os::unix::fs::MetadataExt;
+use std::fs::File;
 
 struct TempFile {
     file: tempfile::NamedTempFile,
@@ -364,5 +367,39 @@ fn can_readlink() {
         assert_eq!(LINK_TARGET.as_bytes(), dst.filename.as_slice());
     }
     //std::fs::remove_file(linkpath);
+    server.wait().unwrap();
+}
+
+#[test]
+fn can_readdir() {
+    let tmp_dir = tempdir::TempDir::new("sftp_readdir").unwrap();
+    let mut files = HashMap::new();
+    let mut path = tmp_dir.path().to_path_buf();
+    path.push("filename");
+    for i in 0..100 {
+        let fname = format!("file-{}", i);
+        files.insert(fname.to_string(), ());
+        path.set_file_name(fname);
+        File::create(&path).unwrap();
+    }
+    let mut server = new_test_sftp_server().unwrap();
+    //let r = DebugReader{inner: server.stdout.take().unwrap()};
+    //let w = DebugWriter{inner: server.stdin.take().unwrap()};
+    let r = server.stdout.take().unwrap();
+    let w = server.stdin.take().unwrap();
+    {
+        let mut client = sftp::Client::new(r, w).unwrap();
+        for file in client.readdir(tmp_dir.path().to_str().unwrap().to_string()).unwrap().map(|x| x.unwrap()) {
+            let fname = String::from_utf8(file.filename).unwrap();
+            if fname == "." || fname == ".." {
+                continue;
+            }
+            match files.remove(&fname) {
+                None => panic!("unexpected file returned from readdir: {:?}", fname),
+                Some(_) => {},
+            }
+        }
+        assert_eq!(0, files.len());
+    }
     server.wait().unwrap();
 }

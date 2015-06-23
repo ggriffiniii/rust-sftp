@@ -248,6 +248,17 @@ impl<W> Client<W> where W : 'static + io::Write + Send {
         Client::<W>::expect_status_response(resp)
     }
 
+    pub fn readdir(&mut self, path: String) -> Result<ReadDir<W>> {
+        let p = packets::FxpOpenDir{path: path.into_bytes()};
+        let resp = try!(self.sender.send_receive(&p));
+        match resp {
+            packets::SftpResponsePacket::Handle(handle) => {
+                Ok(ReadDir{client: self.sender.clone(), handle: handle.handle, names: Vec::new()})
+            },
+            x => Err(error::Error::UnexpectedResponse(Box::new(x))),
+        }
+    }
+
     fn expect_status_response(resp : packets::SftpResponsePacket) -> Result<()> {
         match resp {
             packets::SftpResponsePacket::Status(packets::FxpStatus{code:
@@ -408,5 +419,46 @@ impl<W> io::Seek for File<W> where W : 'static + io::Write + Send {
             }
         };
         Ok(self.offset)
+    }
+}
+
+pub struct ReadDir<W> where W : 'static + io::Write + Send {
+    client: Arc<ClientSender<W>>,
+    handle: Vec<u8>,
+    names: Vec<packets::Name>,
+}
+
+impl<W> Drop for ReadDir<W> where W : 'static + io::Write + Send {
+    fn drop(&mut self) {
+        let p = packets::FxpClose{handle: self.handle.clone()};
+        self.client.send_receive(&p);
+    }
+}
+
+impl<W> Iterator for ReadDir<W> where W : 'static + io::Write + Send {
+    type Item = Result<packets::Name>;
+
+    fn next(&mut self) -> Option<Result<packets::Name>> {
+        match self.names.pop() {
+            Some(name) => Some(Ok(name)),
+            None => {
+                let p = packets::FxpReadDir{handle: self.handle.clone()};
+                let resp = match self.client.send_receive(&p) {
+                    Ok(x) => x,
+                    Err(x) => return Some(Err(x)),
+                };
+                match resp {
+                    packets::SftpResponsePacket::Status(packets::FxpStatus{code: packets::FxpStatusCode::EOF, msg: _}) => {
+                        None
+                    },
+                    packets::SftpResponsePacket::Name(mut names) => {
+                        names.names.reverse();
+                        self.names = names.names;
+                        self.next()
+                    },
+                    x => Some(Err(error::Error::UnexpectedResponse(Box::new(x)))),
+                }
+            },
+        }
     }
 }
