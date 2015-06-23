@@ -11,7 +11,7 @@ mod error;
 
 use std::io;
 use error::Result;
-use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
+use byteorder::{WriteBytesExt, BigEndian};
 use packets::Sendable;
 use std::io::Write;
 use packets::Request;
@@ -46,7 +46,7 @@ impl<R> ClientReceiver<R> where R : 'static + io::Read + Send {
             let mut state = self.state.lock().unwrap();
             match state.requests.remove(&resp.req_id) {
                 Some(tx) => {
-                    tx.send(Ok(resp.packet));
+                    tx.send(Ok(resp.packet)).unwrap();
                 },
                 None => { Self::broadcast_error(&mut state, error::Error::NoMatchingRequest(resp.req_id)); return; },
             }
@@ -56,7 +56,7 @@ impl<R> ClientReceiver<R> where R : 'static + io::Read + Send {
     fn broadcast_error(state: &mut MutexGuard<ReceiverState>, e: error::Error) {
         let arc_wrapped = Arc::new(Box::new(e));
         for (_, tx) in state.requests.iter() {
-            tx.send(Err(error::Error::ReceiverDisconnected(arc_wrapped.clone())));
+            tx.send(Err(error::Error::ReceiverDisconnected(arc_wrapped.clone()))).unwrap();
         }
         state.requests.clear();
         state.recv_error = Some(arc_wrapped.clone());
@@ -106,7 +106,7 @@ impl<W> ClientSender<W> where W : 'static + io::Write + Send {
         try!(w.write_all(&[P::msg_type()][..]));
         try!(w.write_u32::<BigEndian>(req_id));
         try!(w.write_all(bytes.as_slice()));
-        writeln!(&mut io::stderr(), "Send Request: {:?}", *packet);
+        //writeln!(&mut io::stderr(), "Send Request: {:?}", *packet);
         Ok(rx)
     }
 
@@ -114,7 +114,7 @@ impl<W> ClientSender<W> where W : 'static + io::Write + Send {
         Result<packets::SftpResponsePacket> {
             let rx = try!(self.send(packet));
             let resp = rx.recv().unwrap();
-            writeln!(&mut io::stderr(), "Received Response: {:?}", resp);
+            //writeln!(&mut io::stderr(), "Received Response: {:?}", resp);
             resp
     }
 }
@@ -124,15 +124,15 @@ pub struct Client<W> {
 }
 
 impl<W> Client<W> where W : 'static + io::Write + Send {
-	pub fn new<R>(mut r: R, mut w: W) -> Result<Client<W>> where R : 'static + io::Read + Send {
-        let mut s = ClientSender{
+	pub fn new<R>(mut r: R, w: W) -> Result<Client<W>> where R : 'static + io::Read + Send {
+        let s = ClientSender{
             w: Mutex::new(w),
             recv_state: Arc::new(Mutex::new(ReceiverState{requests: HashMap::new(), recv_error: None})),
             req_id: atomic::AtomicUsize::new(0),
         };
         try!(s.send_init());
         let resp = try!(packets::recv(&mut r));
-        writeln!(&mut io::stderr(), "Received Response: {:?}", resp);
+        //writeln!(&mut io::stderr(), "Received Response: {:?}", resp);
         match resp.packet {
             packets::SftpResponsePacket::Version(x) => {
                 if x.version != 3 {
@@ -141,7 +141,7 @@ impl<W> Client<W> where W : 'static + io::Write + Send {
             },
             x => return Err(error::Error::UnexpectedResponse(Box::new(x))),
         }
-        let mut r = ClientReceiver{
+        let r = ClientReceiver{
             r: Mutex::new(r),
             state: s.recv_state.clone(),
         };
@@ -347,7 +347,7 @@ impl<W> File<W>  where W : 'static + io::Write + Send {
 impl<W> Drop for File<W> where W : 'static + io::Write + Send {
     fn drop(&mut self) {
         let p = packets::FxpClose{handle: self.handle.clone()};
-        self.client.send_receive(&p);
+        let _ = self.client.send_receive(&p);
     }
 }
 
@@ -367,7 +367,7 @@ impl<W> io::Read for File<W> where W : 'static + io::Write + Send {
                 Ok(n)
             },
             packets::SftpResponsePacket::Status(packets::FxpStatus{code: packets::FxpStatusCode::EOF, msg: _}) => Ok(0),
-            x => Err(io::Error::new(io::ErrorKind::Other, "unknown error")), // TODO: do better
+            _ => Err(io::Error::new(io::ErrorKind::Other, "unknown error")), // TODO: do better
         }
     }
 }
@@ -394,9 +394,6 @@ impl<W> io::Seek for File<W> where W : 'static + io::Write + Send {
     fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
         let soffset = self.offset as i64;
         self.offset = match pos {
-            io::SeekFrom::Start(i) if i < 0 => {
-                return Err(io::Error::new(io::ErrorKind::InvalidInput, "can not seek past beginning of file"));
-            },
             io::SeekFrom::Start(i) => i,
             io::SeekFrom::Current(i) if soffset + i < 0 => {
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, "can not seek past beginning of file"));
@@ -431,7 +428,7 @@ pub struct ReadDir<W> where W : 'static + io::Write + Send {
 impl<W> Drop for ReadDir<W> where W : 'static + io::Write + Send {
     fn drop(&mut self) {
         let p = packets::FxpClose{handle: self.handle.clone()};
-        self.client.send_receive(&p);
+        let _ = self.client.send_receive(&p);
     }
 }
 

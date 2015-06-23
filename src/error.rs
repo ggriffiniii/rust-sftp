@@ -53,8 +53,8 @@ impl error::Error for Error {
             Error::UnexpectedData => "Unexpected data in message.",
             Error::UnexpectedEOF => "Unexpected EOF.",
             Error::Utf8(ref e) => e.description(),
-            Error::NoMatchingRequest(ref req_id) => "Response received with an unexpected request-id.",
-            Error::MismatchedVersion(ref ver) => "Server responded with an incorrect version",
+            Error::NoMatchingRequest(_) => "Response received with an unexpected request-id.",
+            Error::MismatchedVersion(_) => "Server responded with an incorrect version",
             Error::UnexpectedResponse(_) => "Unexpected response",
         }
     }

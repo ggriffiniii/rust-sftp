@@ -317,9 +317,9 @@ impl Sendable for FxpRead {
     fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
         let mut n = 0;
         n += try!(self.handle.write_to(w));
-        w.write_u64::<BigEndian>(self.offset);
+        try!(w.write_u64::<BigEndian>(self.offset));
         n += 8;
-        w.write_u32::<BigEndian>(self.len);
+        try!(w.write_u32::<BigEndian>(self.len));
         Ok(n)
     }
 }
@@ -339,7 +339,7 @@ impl Sendable for FxpWrite {
     fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
         let mut n = 0;
         n += try!(self.handle.write_to(w));
-        w.write_u64::<BigEndian>(self.offset);
+        try!(w.write_u64::<BigEndian>(self.offset));
         n += 8;
         n += try!(self.data.write_to(w));
         Ok(n)

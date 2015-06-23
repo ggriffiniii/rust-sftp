@@ -40,7 +40,7 @@ impl TempFile {
 impl Drop for TempFile {
     fn drop(&mut self) {
         for path in self.links.iter() {
-            std::fs::remove_file(path);
+            let _ = std::fs::remove_file(path);
         }
     }
 }
@@ -54,6 +54,7 @@ impl Write for TempFile {
     fn flush(&mut self) -> io::Result<()> { self.file.flush() }
 }
 
+#[allow(dead_code)]
 struct DebugWriter<W> {
     inner: W,
 }           
@@ -67,7 +68,8 @@ impl<W : io::Write> io::Write for DebugWriter<W> {
         self.inner.flush()
     }
 }
-                   
+
+#[allow(dead_code)]
 struct DebugReader<R> {
     inner: R,
 }
@@ -75,7 +77,7 @@ struct DebugReader<R> {
 impl<R : io::Read> io::Read for DebugReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let res = self.inner.read(buf);
-        writeln!(&mut io::stderr(), "Reading from server: {:?}", buf);
+        writeln!(&mut io::stderr(), "Reading from server: {:?}", buf).unwrap();
         res
     }
 }
@@ -128,9 +130,9 @@ fn is_send() {
 
 #[test]
 fn can_stat() {
-    const contents : &'static str = "tempfile contents";
+    const CONTENTS : &'static str = "tempfile contents";
     let mut tempfile = TempFile::new();
-    tempfile.write_all(contents.as_bytes()).unwrap();
+    tempfile.write_all(CONTENTS.as_bytes()).unwrap();
     let mut server = new_test_sftp_server().unwrap();
     //let r = DebugReader{inner: server.stdout.take().unwrap()};
     //let w = DebugWriter{inner: server.stdin.take().unwrap()};
@@ -139,16 +141,16 @@ fn can_stat() {
     {
         let mut client = sftp::Client::new(r, w).unwrap();
         let result = client.stat(tempfile.path()).unwrap();
-        assert_eq!(contents.len() as u64, result.size.unwrap());
+        assert_eq!(CONTENTS.len() as u64, result.size.unwrap());
     }
     server.wait().unwrap();
 }
 
 #[test]
 fn can_lstat() {
-    const contents : &'static str = "tempfile contents";
+    const CONTENTS : &'static str = "tempfile contents";
     let mut tempfile = TempFile::new();
-    tempfile.write_all(contents.as_bytes()).unwrap();
+    tempfile.write_all(CONTENTS.as_bytes()).unwrap();
     let link = tempfile.symlink();
     let mut server = new_test_sftp_server().unwrap();
     //let r = DebugReader{inner: server.stdout.take().unwrap()};
@@ -166,9 +168,9 @@ fn can_lstat() {
 
 #[test]
 fn can_read() {
-    const contents : &'static str = "tempfile contents";
+    const CONTENTS : &'static str = "tempfile contents";
     let mut tempfile = TempFile::new();
-    tempfile.write_all(contents.as_bytes()).unwrap();
+    tempfile.write_all(CONTENTS.as_bytes()).unwrap();
     let mut server = new_test_sftp_server().unwrap();
     //let r = DebugReader{inner: server.stdout.take().unwrap()};
     //let w = DebugWriter{inner: server.stdin.take().unwrap()};
@@ -181,14 +183,14 @@ fn can_read() {
         let n = remote_file.read(&mut remote_contents[..]).unwrap();
         assert_eq!(4, n);
         remote_file.read_to_end(&mut remote_contents).unwrap();
-        assert_eq!(contents, String::from_utf8(remote_contents).unwrap());
+        assert_eq!(CONTENTS, String::from_utf8(remote_contents).unwrap());
     }
     server.wait().unwrap();
 }
 
 #[test]
 fn can_write() {
-    const contents : &'static str = "tempfile contents";
+    const CONTENTS : &'static str = "tempfile contents";
     let mut tempfile = TempFile::new();
     let mut server = new_test_sftp_server().unwrap();
     //let r = DebugReader{inner: server.stdout.take().unwrap()};
@@ -198,15 +200,15 @@ fn can_write() {
     {
         let mut client = sftp::Client::new(r, w).unwrap();
         let mut remote_file = client.open_options().write(true).open(tempfile.path()).unwrap();
-        remote_file.write_all(contents.as_bytes()).unwrap();
-        remote_file.write_all(contents.as_bytes()).unwrap();
+        remote_file.write_all(CONTENTS.as_bytes()).unwrap();
+        remote_file.write_all(CONTENTS.as_bytes()).unwrap();
     }
     server.wait().unwrap();
     let mut tempfile_contents = String::new();
     tempfile.read_to_string(&mut tempfile_contents).unwrap();
     let expected = {
-        let mut x = String::from(contents);
-        x.push_str(contents);
+        let mut x = String::from(CONTENTS);
+        x.push_str(CONTENTS);
         x
     };
     assert_eq!(expected, tempfile_contents);
@@ -214,7 +216,7 @@ fn can_write() {
 
 #[test]
 fn can_remove() {
-    let mut tempfile = TempFile::new();
+    let tempfile = TempFile::new();
     let mut server = new_test_sftp_server().unwrap();
     //let r = DebugReader{inner: server.stdout.take().unwrap()};
     //let w = DebugWriter{inner: server.stdin.take().unwrap()};
@@ -231,7 +233,7 @@ fn can_remove() {
 
 #[test]
 fn can_mkdir() {
-    let mut tempfile_path = TempFile::new().path();
+    let tempfile_path = TempFile::new().path();
     let mut server = new_test_sftp_server().unwrap();
     //let r = DebugReader{inner: server.stdout.take().unwrap()};
     //let w = DebugWriter{inner: server.stdin.take().unwrap()};
@@ -248,14 +250,14 @@ fn can_mkdir() {
             Ok(metadata) => assert!(metadata.is_dir()),
             Err(x) => panic!("unable to stat directory {}: {:?}", &tempfile_path, x),
         }
-        std::fs::remove_dir(&tempfile_path);
+        std::fs::remove_dir(&tempfile_path).unwrap();
     }
     server.wait().unwrap();
 }
 
 #[test]
 fn can_rmdir() {
-    let mut tempfile_path = TempFile::new().path();
+    let tempfile_path = TempFile::new().path();
     let mut server = new_test_sftp_server().unwrap();
     //let r = DebugReader{inner: server.stdout.take().unwrap()};
     //let w = DebugWriter{inner: server.stdin.take().unwrap()};
@@ -275,7 +277,7 @@ fn can_rmdir() {
 
 #[test]
 fn can_setstat() {
-    let mut tempfile = TempFile::new();
+    let tempfile = TempFile::new();
     let mut server = new_test_sftp_server().unwrap();
     //let r = DebugReader{inner: server.stdout.take().unwrap()};
     //let w = DebugWriter{inner: server.stdin.take().unwrap()};
@@ -295,7 +297,7 @@ fn can_setstat() {
 
 #[test]
 fn can_fsetstat() {
-    let mut tempfile = TempFile::new();
+    let tempfile = TempFile::new();
     let mut server = new_test_sftp_server().unwrap();
     //let r = DebugReader{inner: server.stdout.take().unwrap()};
     //let w = DebugWriter{inner: server.stdin.take().unwrap()};
@@ -316,7 +318,7 @@ fn can_fsetstat() {
 
 #[test]
 fn can_realpath() {
-    let mut tempfile = TempFile::new();
+    let tempfile = TempFile::new();
     let mut server = new_test_sftp_server().unwrap();
     //let r = DebugReader{inner: server.stdout.take().unwrap()};
     //let w = DebugWriter{inner: server.stdin.take().unwrap()};
@@ -332,7 +334,7 @@ fn can_realpath() {
 
 #[test]
 fn can_rename() {
-    let mut tempfile = TempFile::new();
+    let tempfile = TempFile::new();
     let newpath = TempFile::new().path();
     let mut server = new_test_sftp_server().unwrap();
     //let r = DebugReader{inner: server.stdout.take().unwrap()};
@@ -354,7 +356,7 @@ fn can_rename() {
 #[test]
 fn can_readlink() {
     const LINK_TARGET : &'static str = "/tmp/foobar";
-    let mut linkpath = TempFile::new().path();
+    let linkpath = TempFile::new().path();
     std::os::unix::fs::symlink(LINK_TARGET, &linkpath).unwrap();
     let mut server = new_test_sftp_server().unwrap();
     //let r = DebugReader{inner: server.stdout.take().unwrap()};
