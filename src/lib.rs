@@ -253,7 +253,7 @@ impl<W> Client<W> where W : 'static + io::Write + Send {
         let resp = try!(self.sender.send_receive(&p));
         match resp {
             packets::SftpResponsePacket::Handle(handle) => {
-                Ok(ReadDir{client: self.sender.clone(), handle: handle.handle, names: Vec::new()})
+                Ok(ReadDir{client: self.sender.clone(), handle: handle.handle, names: Vec::new().into_iter()})
             },
             x => Err(error::Error::UnexpectedResponse(Box::new(x))),
         }
@@ -422,7 +422,7 @@ impl<W> io::Seek for File<W> where W : 'static + io::Write + Send {
 pub struct ReadDir<W> where W : 'static + io::Write + Send {
     client: Arc<ClientSender<W>>,
     handle: Vec<u8>,
-    names: Vec<packets::Name>,
+    names: std::vec::IntoIter<packets::Name>,
 }
 
 impl<W> Drop for ReadDir<W> where W : 'static + io::Write + Send {
@@ -436,7 +436,7 @@ impl<W> Iterator for ReadDir<W> where W : 'static + io::Write + Send {
     type Item = Result<packets::Name>;
 
     fn next(&mut self) -> Option<Result<packets::Name>> {
-        match self.names.pop() {
+        match self.names.next() {
             Some(name) => Some(Ok(name)),
             None => {
                 let p = packets::FxpReadDir{handle: self.handle.clone()};
@@ -448,9 +448,8 @@ impl<W> Iterator for ReadDir<W> where W : 'static + io::Write + Send {
                     packets::SftpResponsePacket::Status(packets::FxpStatus{code: packets::FxpStatusCode::EOF, msg: _}) => {
                         None
                     },
-                    packets::SftpResponsePacket::Name(mut names) => {
-                        names.names.reverse();
-                        self.names = names.names;
+                    packets::SftpResponsePacket::Name(names) => {
+                        self.names = names.names.into_iter();
                         self.next()
                     },
                     x => Some(Err(error::Error::UnexpectedResponse(Box::new(x)))),
