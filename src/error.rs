@@ -24,27 +24,6 @@ pub enum Error {
     UnexpectedResponse(Box<packets::SftpResponsePacket>),
 }
 
-impl From<io::Error> for Error {
-    fn from(err: io::Error) -> Error {
-        Error::Io(err)
-    }
-}
-
-impl From<ByteError> for Error {
-    fn from(err: ByteError) -> Error {
-            match err {
-                ByteError::Io(ioerr) => Error::Io(ioerr),
-                ByteError::UnexpectedEOF => Error::UnexpectedEOF,
-            }
-    }
-}
-
-impl From<FromUtf8Error> for Error {
-    fn from(err: FromUtf8Error) -> Error {
-        Error::Utf8(err)
-    }
-}
-
 impl error::Error for Error {
     fn description(&self) -> &str {
         match *self {
@@ -72,15 +51,35 @@ impl error::Error for Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            Error::ReceiverDisconnected(_) => write!(f, "Receiver disconnected."),
+            Error::ReceiverDisconnected(ref reason) => write!(f, "Receiver disconnected: {}", ***reason),
             Error::Io(ref err) => err.fmt(f),
             Error::UnexpectedData => write!(f, "Unexpected data in message."),
             Error::UnexpectedEOF => write!(f, "Unexpected EOF."),
             Error::Utf8(ref err) => err.fmt(f),
-            Error::NoMatchingRequest(ref req_id) => write!(f, "Response received with an unexpected request-id: {}", req_id),
-            Error::MismatchedVersion(ref ver) => write!(f, "Server responded with version {}. Only version 3 is supported.", ver),
+            Error::NoMatchingRequest(ref req_id) => write!(f, "Response received with an unexpected request-id: {}", *req_id),
+            Error::MismatchedVersion(ref ver) => write!(f, "Server responded with version {}. Only version 3 is supported.", *ver),
             Error::UnexpectedResponse(_) => write!(f, "Unexpected response"),
         }
     }
 }
 
+impl From<io::Error> for Error {
+    fn from(err: io::Error) -> Error {
+        Error::Io(err)
+    }
+}
+
+impl From<ByteError> for Error {
+    fn from(err: ByteError) -> Error {
+            match err {
+                ByteError::Io(ioerr) => Error::Io(ioerr),
+                ByteError::UnexpectedEOF => Error::UnexpectedEOF,
+            }
+    }
+}
+
+impl From<FromUtf8Error> for Error {
+    fn from(err: FromUtf8Error) -> Error {
+        Error::Utf8(err)
+    }
+}
