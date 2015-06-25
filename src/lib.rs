@@ -162,9 +162,8 @@ impl<W> Client<W> where W : 'static + io::Write + Send {
     fn do_stat<T : packets::Request>(&mut self, p: T) -> Result<packets::FileAttr> {
         let resp = try!(self.sender.send_receive(&p));
         match resp {
-            packets::SftpResponsePacket::Attrs(attrs) => {
-                Ok(attrs)
-            },
+            packets::SftpResponsePacket::Attrs(attrs) => Ok(attrs),
+            packets::SftpResponsePacket::Status(status) => Err(error::Error::FromServer(Box::new(status))),
             x => Err(error::Error::UnexpectedResponse(Box::new(x)))
         }
     }
@@ -198,6 +197,7 @@ impl<W> Client<W> where W : 'static + io::Write + Send {
                     Err(error::Error::UnexpectedResponse(Box::new(packets::SftpResponsePacket::Name(name))))
                 }
             },
+            packets::SftpResponsePacket::Status(status) => Err(error::Error::FromServer(Box::new(status))),
             x => Err(error::Error::UnexpectedResponse(Box::new(x))),
         }
     }
@@ -219,6 +219,7 @@ impl<W> Client<W> where W : 'static + io::Write + Send {
                     Err(error::Error::UnexpectedResponse(Box::new(packets::SftpResponsePacket::Name(name))))
                 }
             },
+            packets::SftpResponsePacket::Status(status) => Err(error::Error::FromServer(Box::new(status))),
             x => Err(error::Error::UnexpectedResponse(Box::new(x))),
         }
     }
@@ -238,6 +239,7 @@ impl<W> Client<W> where W : 'static + io::Write + Send {
             packets::SftpResponsePacket::Handle(handle) => {
                 Ok(File{client: self.sender.clone(), handle: handle.handle, offset: 0})
             },
+            packets::SftpResponsePacket::Status(status) => Err(error::Error::FromServer(Box::new(status))),
             x => Err(error::Error::UnexpectedResponse(Box::new(x))),
         }
     }
@@ -255,6 +257,7 @@ impl<W> Client<W> where W : 'static + io::Write + Send {
             packets::SftpResponsePacket::Handle(handle) => {
                 Ok(ReadDir{client: self.sender.clone(), handle: handle.handle, names: Vec::new().into_iter()})
             },
+            packets::SftpResponsePacket::Status(status) => Err(error::Error::FromServer(Box::new(status))),
             x => Err(error::Error::UnexpectedResponse(Box::new(x))),
         }
     }
@@ -263,6 +266,7 @@ impl<W> Client<W> where W : 'static + io::Write + Send {
         match resp {
             packets::SftpResponsePacket::Status(packets::FxpStatus{code:
                 packets::FxpStatusCode::Ok, msg: _}) => Ok(()),
+            packets::SftpResponsePacket::Status(status) => Err(error::Error::FromServer(Box::new(status))),
             x => Err(error::Error::UnexpectedResponse(Box::new(x))),
         }
     }
@@ -367,7 +371,8 @@ impl<W> io::Read for File<W> where W : 'static + io::Write + Send {
                 Ok(n)
             },
             packets::SftpResponsePacket::Status(packets::FxpStatus{code: packets::FxpStatusCode::EOF, msg: _}) => Ok(0),
-            _ => Err(io::Error::new(io::ErrorKind::Other, "unknown error")), // TODO: do better
+            packets::SftpResponsePacket::Status(status) => Err(From::from(status)),
+            _ => Err(io::Error::new(io::ErrorKind::Other, "unknown error")),
         }
     }
 }
@@ -383,6 +388,7 @@ impl<W> io::Write for File<W> where W : 'static + io::Write + Send {
         };
         match resp {
             packets::SftpResponsePacket::Status(packets::FxpStatus{code: packets::FxpStatusCode::Ok, msg: _}) => { self.offset += p.data.len() as u64; Ok(p.data.len()) },
+            packets::SftpResponsePacket::Status(status) => Err(From::from(status)),
             _ => Err(io::Error::new(io::ErrorKind::Other, "unknown error")),
         }
     }

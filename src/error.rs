@@ -21,6 +21,7 @@ pub enum Error {
     Utf8(FromUtf8Error),
     NoMatchingRequest(u32),
     MismatchedVersion(u32),
+    FromServer(Box<packets::FxpStatus>),
     UnexpectedResponse(Box<packets::SftpResponsePacket>),
 }
 
@@ -34,6 +35,7 @@ impl error::Error for Error {
             Error::Utf8(ref e) => e.description(),
             Error::NoMatchingRequest(_) => "Response received with an unexpected request-id.",
             Error::MismatchedVersion(_) => "Server responded with an incorrect version",
+            Error::FromServer(_) => "Server responded with error",
             Error::UnexpectedResponse(_) => "Unexpected response",
         }
     }
@@ -58,6 +60,7 @@ impl fmt::Display for Error {
             Error::Utf8(ref err) => err.fmt(f),
             Error::NoMatchingRequest(ref req_id) => write!(f, "Response received with an unexpected request-id: {}", *req_id),
             Error::MismatchedVersion(ref ver) => write!(f, "Server responded with version {}. Only version 3 is supported.", *ver),
+            Error::FromServer(ref err) => write!(f, "Server responded with: {}", **err),
             Error::UnexpectedResponse(_) => write!(f, "Unexpected response"),
         }
     }
