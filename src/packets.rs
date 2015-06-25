@@ -48,7 +48,9 @@ pub trait Request : fmt::Debug + Sendable {
 }
 
 pub trait Sendable {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize>;
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()>;
+
+    fn size(&self) -> u32;
 }
 
 pub trait Response : fmt::Debug + Receivable {
@@ -77,13 +79,13 @@ pub enum SftpResponsePacket {
 }
 
 impl Sendable for Vec<u8> {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
-        let mut n : usize = 0;
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
         try!(w.write_u32::<BigEndian>(self.len() as u32));
-        n += 4;
-        try!(w.write_all(self.as_slice()));
-        n += self.len();
-        Ok(n)
+        Ok(try!(w.write_all(self.as_slice())))
+    }
+
+    fn size(&self) -> u32 {
+        4 + self.len() as u32
     }
 }
 
@@ -107,11 +109,13 @@ pub struct Extension {
 }
 
 impl Sendable for Extension {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
-        let mut n : usize = 0;
-        n += try!(self.name.write_to(w));
-        n += try!(self.data.write_to(w));
-        Ok(n)
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+        try!(self.name.write_to(w));
+        Ok(try!(self.data.write_to(w)))
+    }
+
+    fn size(&self) -> u32 {
+        self.name.size() + self.data.size()
     }
 }
 
@@ -155,7 +159,7 @@ impl FileAttr {
 }
 
 impl Sendable for FileAttr {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
         let mut flags : u32 = 0;
         if self.size.is_some() {
             flags |= SSH_FILEXFER_ATTR_SIZE;
@@ -172,37 +176,49 @@ impl Sendable for FileAttr {
         if self.extensions.len() > 0 {
             flags |= SSH_FILEXFER_ATTR_EXTENDED;
         }
-        let mut n : usize = 0;
         try!(w.write_u32::<BigEndian>(flags));
-        n += 4;
         if let Some(size) = self.size {
             try!(w.write_u64::<BigEndian>(size));
-            n += 8;
         }
         match (self.uid, self.gid) {
             (Some(uid), Some(gid)) => {
                 try!(w.write_u32::<BigEndian>(uid));
                 try!(w.write_u32::<BigEndian>(gid));
-                n += 8;
             },
             _ => {},
         }
         if let Some(perms) = self.perms {
             try!(w.write_u32::<BigEndian>(perms));
-            n += 4;
         }
         match (self.atime, self.mtime) {
             (Some(atime), Some(mtime)) => {
                 try!(w.write_u32::<BigEndian>(atime));
                 try!(w.write_u32::<BigEndian>(mtime));
-                n += 8;
             },
             _ => {},
         }
         for extension in self.extensions.iter() {
-            n += try!(extension.write_to(w));
+            try!(extension.write_to(w));
         }
-        Ok(n)
+        Ok(())
+    }
+
+    fn size(&self) -> u32 {
+        let mut n : u32 = 4;
+        if self.size.is_some() {
+            n += 4;
+        }
+        if self.uid.is_some() && self.gid.is_some() {
+            n += 8;
+        }
+        if self.perms.is_some() {
+            n += 4;
+        }
+        if self.atime.is_some() && self.mtime.is_some() {
+            n += 8;
+        }
+        n += self.extensions.iter().fold(0, |acc, e| acc + e.size());
+        n
     }
 }
 
@@ -254,14 +270,16 @@ impl Request for FxpInit {
 }
 
 impl Sendable for FxpInit {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
-        let mut n : usize = 0;
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
         try!(w.write_u32::<BigEndian>(self.version));
-        n += 4;
         for e in self.extensions.iter() {
-            n += try!(e.write_to(w));
+            try!(e.write_to(w));
         }
-        Ok(n)
+        Ok(())
+    }
+
+    fn size(&self) -> u32 {
+        4 + self.extensions.iter().fold(0, |acc, e| acc + e.size())
     }
 }
 
@@ -277,13 +295,14 @@ impl Request for FxpOpen {
 }
 
 impl Sendable for FxpOpen {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
-        let mut n : usize = 0;
-        n += try!(self.filename.write_to(w));
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+        try!(self.filename.write_to(w));
         try!(w.write_u32::<BigEndian>(self.pflags));
-        n += 4;
-        n += try!(self.attrs.write_to(w));
-        Ok(n)
+        Ok(try!(self.attrs.write_to(w)))
+    }
+
+    fn size(&self) -> u32 {
+        4 + self.filename.size() + self.attrs.size()
     }
 }
 
@@ -297,8 +316,12 @@ impl Request for FxpClose {
 }
 
 impl Sendable for FxpClose {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
         Ok(try!(self.handle.write_to(w)))
+    }
+
+    fn size(&self) -> u32 {
+        self.handle.size()
     }
 }
 
@@ -314,13 +337,14 @@ impl Request for FxpRead {
 }
 
 impl Sendable for FxpRead {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
-        let mut n = 0;
-        n += try!(self.handle.write_to(w));
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+        try!(self.handle.write_to(w));
         try!(w.write_u64::<BigEndian>(self.offset));
-        n += 8;
-        try!(w.write_u32::<BigEndian>(self.len));
-        Ok(n)
+        Ok(try!(w.write_u32::<BigEndian>(self.len)))
+    }
+
+    fn size(&self) -> u32 {
+        self.handle.size() + 8 + 4
     }
 }
 
@@ -336,13 +360,14 @@ impl Request for FxpWrite {
 }
 
 impl Sendable for FxpWrite {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
-        let mut n = 0;
-        n += try!(self.handle.write_to(w));
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+        try!(self.handle.write_to(w));
         try!(w.write_u64::<BigEndian>(self.offset));
-        n += 8;
-        n += try!(self.data.write_to(w));
-        Ok(n)
+        Ok(try!(self.data.write_to(w)))
+    }
+
+    fn size(&self) -> u32 {
+        self.handle.size() + 8 + self.data.size()
     }
 }
 
@@ -356,8 +381,12 @@ impl Request for FxpLStat {
 }
 
 impl Sendable for FxpLStat {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
         Ok(try!(self.path.write_to(w)))
+    }
+
+    fn size(&self) -> u32 {
+        self.path.size()
     }
 }
 
@@ -371,8 +400,12 @@ impl Request for FxpFStat {
 }
 
 impl Sendable for FxpFStat {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
         Ok(try!(self.handle.write_to(w)))
+    }
+
+    fn size(&self) -> u32 {
+        self.handle.size()
     }
 }
 
@@ -387,10 +420,13 @@ impl Request for FxpSetStat {
 }
 
 impl Sendable for FxpSetStat {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
-        let mut n = try!(self.path.write_to(w));
-        n += try!(self.attrs.write_to(w));
-        Ok(n)
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+        try!(self.path.write_to(w));
+        Ok(try!(self.attrs.write_to(w)))
+    }
+
+    fn size(&self) -> u32 {
+        self.path.size() + self.attrs.size()
     }
 }
 
@@ -405,10 +441,13 @@ impl Request for FxpFSetStat {
 }
 
 impl Sendable for FxpFSetStat {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
-        let mut n = try!(self.handle.write_to(w));
-        n += try!(self.attrs.write_to(w));
-        Ok(n)
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+        try!(self.handle.write_to(w));
+        Ok(try!(self.attrs.write_to(w)))
+    }
+
+    fn size(&self) -> u32 {
+        self.handle.size() + self.attrs.size()
     }
 }
 
@@ -422,8 +461,12 @@ impl Request for FxpOpenDir {
 }
 
 impl Sendable for FxpOpenDir {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
         Ok(try!(self.path.write_to(w)))
+    }
+
+    fn size(&self) -> u32 {
+        self.path.size()
     }
 }
 
@@ -437,8 +480,12 @@ impl Request for FxpReadDir {
 }
 
 impl Sendable for FxpReadDir {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
         Ok(try!(self.handle.write_to(w)))
+    }
+
+    fn size(&self) -> u32 {
+        self.handle.size()
     }
 }
 
@@ -452,8 +499,12 @@ impl Request for FxpRemove {
 }
 
 impl Sendable for FxpRemove {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
         Ok(try!(self.filename.write_to(w)))
+    }
+
+    fn size(&self) -> u32 {
+        self.filename.size()
     }
 }
 
@@ -468,10 +519,13 @@ impl Request for FxpMkDir {
 }
 
 impl Sendable for FxpMkDir {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
-        let mut n = try!(self.path.write_to(w));
-        n += try!(self.attrs.write_to(w));
-        Ok(n)
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+        try!(self.path.write_to(w));
+        Ok(try!(self.attrs.write_to(w)))
+    }
+
+    fn size(&self) -> u32 {
+        self.path.size() + self.attrs.size()
     }
 }
 
@@ -485,8 +539,12 @@ impl Request for FxpRmDir {
 }
 
 impl Sendable for FxpRmDir {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
         Ok(try!(self.path.write_to(w)))
+    }
+
+    fn size(&self) -> u32 {
+        self.path.size()
     }
 }
 
@@ -500,8 +558,12 @@ impl Request for FxpRealPath {
 }
 
 impl Sendable for FxpRealPath {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
         Ok(try!(self.path.write_to(w)))
+    }
+
+    fn size(&self) -> u32 {
+        self.path.size()
     }
 }
 
@@ -515,8 +577,12 @@ impl Request for FxpStat {
 }
 
 impl Sendable for FxpStat {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
         Ok(try!(self.path.write_to(w)))
+    }
+
+    fn size(&self) -> u32 {
+        self.path.size()
     }
 }
 
@@ -531,10 +597,13 @@ impl Request for FxpRename {
 }
 
 impl Sendable for FxpRename {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
-        let mut n = try!(self.oldpath.write_to(w));
-        n += try!(self.newpath.write_to(w));
-        Ok(n)
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+        try!(self.oldpath.write_to(w));
+        Ok(try!(self.newpath.write_to(w)))
+    }
+
+    fn size(&self) -> u32 {
+        self.oldpath.size() + self.newpath.size()
     }
 }
 
@@ -548,8 +617,12 @@ impl Request for FxpReadLink {
 }
 
 impl Sendable for FxpReadLink {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<usize> {
+    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
         Ok(try!(self.path.write_to(w)))
+    }
+
+    fn size(&self) -> u32 {
+        self.path.size()
     }
 }
 

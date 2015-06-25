@@ -74,19 +74,13 @@ impl<W> ClientSender<W> where W : 'static + io::Write + Send {
         self.req_id.fetch_add(1, atomic::Ordering::Relaxed) as ReqId
     }
 
-    fn send_init(&self) -> Result<usize> {
-        let mut n : usize = 0;
-        let mut bytes : Vec<u8> = Vec::new();
+    fn send_init(&self) -> Result<()> {
         let init_packet = packets::FxpInit{version: 3, extensions: Vec::new()};
-        try!(init_packet.write_to(&mut bytes));
         let mut w = self.w.lock().unwrap();
-        try!(w.write_u32::<BigEndian>(bytes.len() as u32 + 1));
-        n += 4;
+        try!(w.write_u32::<BigEndian>(init_packet.size() + 1));
         try!(w.write_all(&[packets::FxpInit::msg_type()][..]));
-        n += 1;
-        try!(w.write_all(bytes.as_slice()));
-        n += bytes.len();
-        Ok(n)
+        try!(init_packet.write_to(&mut *w));
+        Ok(())
     }
 
     fn send<P : packets::Request>(&self, packet : &P) -> Result<mpsc::Receiver<Result<packets::SftpResponsePacket>>> {
@@ -99,13 +93,11 @@ impl<W> ClientSender<W> where W : 'static + io::Write + Send {
             }
             recv_state.requests.insert(req_id, tx);
         }
-        let mut bytes : Vec<u8> = Vec::new();
-        try!(packet.write_to(&mut bytes));
         let mut w = self.w.lock().unwrap();
-        try!(w.write_u32::<BigEndian>(bytes.len() as u32 + 5));
+        try!(w.write_u32::<BigEndian>(packet.size() + 5));
         try!(w.write_all(&[P::msg_type()][..]));
         try!(w.write_u32::<BigEndian>(req_id));
-        try!(w.write_all(bytes.as_slice()));
+        try!(packet.write_to(&mut *w));
         //writeln!(&mut io::stderr(), "Send Request: {:?}", *packet);
         Ok(rx)
     }
