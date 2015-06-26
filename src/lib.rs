@@ -11,7 +11,6 @@ mod error;
 
 use std::io;
 use error::Result;
-use byteorder::{WriteBytesExt, BigEndian};
 use packets::Sendable;
 use std::io::Write;
 use packets::Request;
@@ -77,8 +76,9 @@ impl<W> ClientSender<W> where W : 'static + io::Write + Send {
     fn send_init(&self) -> Result<()> {
         let init_packet = packets::FxpInit{version: 3, extensions: Vec::new()};
         let mut w = self.w.lock().unwrap();
-        try!(w.write_u32::<BigEndian>(init_packet.size() + 1));
-        try!(w.write_all(&[packets::FxpInit::msg_type()][..]));
+        let n = packets::FxpInit::msg_type().size() + init_packet.size();
+        try!(n.write_to(&mut *w));
+        try!(packets::FxpInit::msg_type().write_to(&mut *w));
         try!(init_packet.write_to(&mut *w));
         Ok(())
     }
@@ -94,9 +94,10 @@ impl<W> ClientSender<W> where W : 'static + io::Write + Send {
             recv_state.requests.insert(req_id, tx);
         }
         let mut w = self.w.lock().unwrap();
-        try!(w.write_u32::<BigEndian>(packet.size() + 5));
-        try!(w.write_all(&[P::msg_type()][..]));
-        try!(w.write_u32::<BigEndian>(req_id));
+        let n = P::msg_type().size() + req_id.size() + packet.size();
+        try!(n.write_to(&mut *w));
+        try!(P::msg_type().write_to(&mut *w));
+        try!(req_id.write_to(&mut *w));
         try!(packet.write_to(&mut *w));
         //writeln!(&mut io::stderr(), "Send Request: {:?}", *packet);
         Ok(rx)

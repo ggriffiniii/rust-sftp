@@ -48,7 +48,7 @@ pub trait Request : fmt::Debug + Sendable {
 }
 
 pub trait Sendable {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()>;
+    fn write_to<W: io::Write>(&self, w: &mut W) -> Result<()>;
 
     fn size(&self) -> u32;
 }
@@ -58,7 +58,7 @@ pub trait Response : fmt::Debug + Receivable {
 }
 
 pub trait Receivable {
-    fn recv<R : io::Read>(r: &mut io::Take<R>) -> Result<Self>;
+    fn recv<R: io::Read>(r: &mut R) -> Result<Self>;
 }
 
 #[derive(Debug)]
@@ -78,8 +78,60 @@ pub enum SftpResponsePacket {
     Unknown{msg_type: u8, data: Vec<u8>},
 }
 
+impl Sendable for u8 {
+    fn write_to<W: io::Write>(&self, w: &mut W) -> Result<()> {
+        Ok(try!(w.write_all(&[*self])))
+    }
+
+    fn size(&self) -> u32 {
+        1
+    }
+}
+
+impl Receivable for u8 {
+    fn recv<R: io::Read>(r: &mut R) -> Result<u8> {
+        let mut buf = [0;1];
+        if try!(r.read(&mut buf)) < 1 {
+            return Err(Error::UnexpectedEOF)
+        }
+        Ok(buf[0])
+    }
+}
+
+impl Sendable for u32 {
+    fn write_to<W: io::Write>(&self, w: &mut W) -> Result<()> {
+        Ok(try!(w.write_u32::<BigEndian>(*self)))
+    }
+
+    fn size(&self) -> u32 {
+        4
+    }
+}
+
+impl Receivable for u32 {
+    fn recv<R: io::Read>(r: &mut R) -> Result<u32> {
+        Ok(try!(r.read_u32::<BigEndian>()))
+    }
+}
+
+impl Sendable for u64 {
+    fn write_to<W: io::Write>(&self, w: &mut W) -> Result<()> {
+        Ok(try!(w.write_u64::<BigEndian>(*self)))
+    }
+
+    fn size(&self) -> u32 {
+        8
+    }
+}
+
+impl Receivable for u64 {
+    fn recv<R: io::Read>(r: &mut R) -> Result<u64> {
+        Ok(try!(r.read_u64::<BigEndian>()))
+    }
+}
+
 impl Sendable for Vec<u8> {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+    fn write_to<W: io::Write>(&self, w: &mut W) -> Result<()> {
         try!(w.write_u32::<BigEndian>(self.len() as u32));
         Ok(try!(w.write_all(self.as_slice())))
     }
@@ -90,7 +142,7 @@ impl Sendable for Vec<u8> {
 }
 
 impl Receivable for Vec<u8> {
-    fn recv<R : io::Read>(r: &mut io::Take<R>) -> Result<Vec<u8>> {
+    fn recv<R: io::Read>(r: &mut R) -> Result<Vec<u8>> {
         let l = try!(r.read_u32::<BigEndian>());
         let mut s = Vec::with_capacity(l as usize);
         let mut lr = r.take(l as u64);
@@ -102,6 +154,28 @@ impl Receivable for Vec<u8> {
     }
 }
 
+impl<T> Sendable for Option<T> where T : Sendable {
+    fn write_to<W: io::Write>(&self, w: &mut W) -> Result<()> {
+        match *self {
+            Some(ref x) => Ok(try!(x.write_to(w))),
+            None => Ok(()),
+        }
+    }
+
+    fn size(&self) -> u32 {
+        match *self {
+            Some(ref x) => x.size(),
+            None => 0,
+        }
+    }
+}
+
+impl<T> Receivable for Option<T> where T : Receivable {
+    fn recv<R: io::Read>(r: &mut R) -> Result<Option<T>> {
+        Ok(Some(try!(T::recv(r))))
+    }
+}
+
 #[derive(Debug)]
 pub struct Extension {
     pub name: Vec<u8>,
@@ -109,7 +183,7 @@ pub struct Extension {
 }
 
 impl Sendable for Extension {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+    fn write_to<W: io::Write>(&self, w: &mut W) -> Result<()> {
         try!(self.name.write_to(w));
         Ok(try!(self.data.write_to(w)))
     }
@@ -120,7 +194,7 @@ impl Sendable for Extension {
 }
 
 impl Receivable for Extension {
-    fn recv<R : io::Read>(r: &mut io::Take<R>) -> Result<Extension> {
+    fn recv<R: io::Read>(r: &mut R) -> Result<Extension> {
         let name = try!(Vec::<u8>::recv(r));
         let data = try!(Vec::<u8>::recv(r));
         Ok(Extension{name: name, data: data})
@@ -159,7 +233,7 @@ impl FileAttr {
 }
 
 impl Sendable for FileAttr {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+    fn write_to<W: io::Write>(&self, w: &mut W) -> Result<()> {
         let mut flags : u32 = 0;
         if self.size.is_some() {
             flags |= SSH_FILEXFER_ATTR_SIZE;
@@ -176,27 +250,12 @@ impl Sendable for FileAttr {
         if self.extensions.len() > 0 {
             flags |= SSH_FILEXFER_ATTR_EXTENDED;
         }
-        try!(w.write_u32::<BigEndian>(flags));
-        if let Some(size) = self.size {
-            try!(w.write_u64::<BigEndian>(size));
-        }
-        match (self.uid, self.gid) {
-            (Some(uid), Some(gid)) => {
-                try!(w.write_u32::<BigEndian>(uid));
-                try!(w.write_u32::<BigEndian>(gid));
-            },
-            _ => {},
-        }
-        if let Some(perms) = self.perms {
-            try!(w.write_u32::<BigEndian>(perms));
-        }
-        match (self.atime, self.mtime) {
-            (Some(atime), Some(mtime)) => {
-                try!(w.write_u32::<BigEndian>(atime));
-                try!(w.write_u32::<BigEndian>(mtime));
-            },
-            _ => {},
-        }
+        try!(flags.write_to(w));
+        try!(self.size.write_to(w));
+        try!(self.uid.write_to(w));
+        try!(self.gid.write_to(w));
+        try!(self.atime.write_to(w));
+        try!(self.mtime.write_to(w));
         for extension in self.extensions.iter() {
             try!(extension.write_to(w));
         }
@@ -204,49 +263,36 @@ impl Sendable for FileAttr {
     }
 
     fn size(&self) -> u32 {
-        let mut n : u32 = 4;
-        if self.size.is_some() {
-            n += 4;
-        }
-        if self.uid.is_some() && self.gid.is_some() {
-            n += 8;
-        }
-        if self.perms.is_some() {
-            n += 4;
-        }
-        if self.atime.is_some() && self.mtime.is_some() {
-            n += 8;
-        }
-        n += self.extensions.iter().fold(0, |acc, e| acc + e.size());
-        n
+        return 4 + self.size.size() + self.uid.size() + self.gid.size() + self.atime.size() +
+            self.mtime.size() + self.extensions.iter().fold(0, |acc, e| acc + e.size());
     }
 }
 
 impl Receivable for FileAttr {
-    fn recv<R: io::Read>(r: &mut io::Take<R>) -> Result<FileAttr> {
+    fn recv<R: io::Read>(r: &mut R) -> Result<FileAttr> {
         let flags = try!(r.read_u32::<BigEndian>());
         let size = if flags & SSH_FILEXFER_ATTR_SIZE != 0 {
-            Some(try!(r.read_u64::<BigEndian>()))
+            try!(Option::<u64>::recv(r))
         } else {
             None
         };
         let (uid, gid) = if flags & SSH_FILEXFER_ATTR_UIDGID != 0 {
-            (Some(try!(r.read_u32::<BigEndian>())), Some(try!(r.read_u32::<BigEndian>())))
+            (try!(Option::<u32>::recv(r)), try!(Option::<u32>::recv(r)))
         } else {
             (None, None)
         };
         let perms = if flags & SSH_FILEXFER_ATTR_PERMISSIONS != 0 {
-            Some(try!(r.read_u32::<BigEndian>()))
+            try!(Option::<u32>::recv(r))
         } else {
             None
         };
         let (atime, mtime) = if flags & SSH_FILEXFER_ATTR_ACMODTIME != 0 {
-            (Some(try!(r.read_u32::<BigEndian>())), Some(try!(r.read_u32::<BigEndian>())))
+            (try!(Option::<u32>::recv(r)), try!(Option::<u32>::recv(r)))
         } else {
             (None, None)
         };
         let extensions = if flags & SSH_FILEXFER_ATTR_EXTENDED != 0 {
-            let ext_count = try!(r.read_u32::<BigEndian>());
+            let ext_count = try!(u32::recv(r));
             let mut extensions = Vec::new();
             for _ in 0..ext_count {
                 extensions.push(try!(Extension::recv(r)));
@@ -270,8 +316,8 @@ impl Request for FxpInit {
 }
 
 impl Sendable for FxpInit {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
-        try!(w.write_u32::<BigEndian>(self.version));
+    fn write_to<W: io::Write>(&self, w: &mut W) -> Result<()> {
+        try!(self.version.write_to(w));
         for e in self.extensions.iter() {
             try!(e.write_to(w));
         }
@@ -279,7 +325,7 @@ impl Sendable for FxpInit {
     }
 
     fn size(&self) -> u32 {
-        4 + self.extensions.iter().fold(0, |acc, e| acc + e.size())
+        self.version.size() + self.extensions.iter().fold(0, |acc, e| acc + e.size())
     }
 }
 
@@ -295,14 +341,14 @@ impl Request for FxpOpen {
 }
 
 impl Sendable for FxpOpen {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+    fn write_to<W: io::Write>(&self, w: &mut W) -> Result<()> {
         try!(self.filename.write_to(w));
-        try!(w.write_u32::<BigEndian>(self.pflags));
+        try!(self.pflags.write_to(w));
         Ok(try!(self.attrs.write_to(w)))
     }
 
     fn size(&self) -> u32 {
-        4 + self.filename.size() + self.attrs.size()
+        self.filename.size() + self.pflags.size() + self.attrs.size()
     }
 }
 
@@ -316,7 +362,7 @@ impl Request for FxpClose {
 }
 
 impl Sendable for FxpClose {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+    fn write_to<W: io::Write>(&self, w: &mut W) -> Result<()> {
         Ok(try!(self.handle.write_to(w)))
     }
 
@@ -337,14 +383,14 @@ impl Request for FxpRead {
 }
 
 impl Sendable for FxpRead {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+    fn write_to<W: io::Write>(&self, w: &mut W) -> Result<()> {
         try!(self.handle.write_to(w));
-        try!(w.write_u64::<BigEndian>(self.offset));
-        Ok(try!(w.write_u32::<BigEndian>(self.len)))
+        try!(self.offset.write_to(w));
+        Ok(try!(self.len.write_to(w)))
     }
 
     fn size(&self) -> u32 {
-        self.handle.size() + 8 + 4
+        self.handle.size() + self.offset.size() + self.len.size()
     }
 }
 
@@ -360,14 +406,14 @@ impl Request for FxpWrite {
 }
 
 impl Sendable for FxpWrite {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+    fn write_to<W: io::Write>(&self, w: &mut W) -> Result<()> {
         try!(self.handle.write_to(w));
-        try!(w.write_u64::<BigEndian>(self.offset));
+        try!(self.offset.write_to(w));
         Ok(try!(self.data.write_to(w)))
     }
 
     fn size(&self) -> u32 {
-        self.handle.size() + 8 + self.data.size()
+        self.handle.size() + self.offset.size() + self.data.size()
     }
 }
 
@@ -381,7 +427,7 @@ impl Request for FxpLStat {
 }
 
 impl Sendable for FxpLStat {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+    fn write_to<W: io::Write>(&self, w: &mut W) -> Result<()> {
         Ok(try!(self.path.write_to(w)))
     }
 
@@ -400,7 +446,7 @@ impl Request for FxpFStat {
 }
 
 impl Sendable for FxpFStat {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+    fn write_to<W: io::Write>(&self, w: &mut W) -> Result<()> {
         Ok(try!(self.handle.write_to(w)))
     }
 
@@ -420,7 +466,7 @@ impl Request for FxpSetStat {
 }
 
 impl Sendable for FxpSetStat {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+    fn write_to<W: io::Write>(&self, w: &mut W) -> Result<()> {
         try!(self.path.write_to(w));
         Ok(try!(self.attrs.write_to(w)))
     }
@@ -441,7 +487,7 @@ impl Request for FxpFSetStat {
 }
 
 impl Sendable for FxpFSetStat {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+    fn write_to<W: io::Write>(&self, w: &mut W) -> Result<()> {
         try!(self.handle.write_to(w));
         Ok(try!(self.attrs.write_to(w)))
     }
@@ -461,7 +507,7 @@ impl Request for FxpOpenDir {
 }
 
 impl Sendable for FxpOpenDir {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+    fn write_to<W: io::Write>(&self, w: &mut W) -> Result<()> {
         Ok(try!(self.path.write_to(w)))
     }
 
@@ -480,7 +526,7 @@ impl Request for FxpReadDir {
 }
 
 impl Sendable for FxpReadDir {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+    fn write_to<W: io::Write>(&self, w: &mut W) -> Result<()> {
         Ok(try!(self.handle.write_to(w)))
     }
 
@@ -499,7 +545,7 @@ impl Request for FxpRemove {
 }
 
 impl Sendable for FxpRemove {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+    fn write_to<W: io::Write>(&self, w: &mut W) -> Result<()> {
         Ok(try!(self.filename.write_to(w)))
     }
 
@@ -519,7 +565,7 @@ impl Request for FxpMkDir {
 }
 
 impl Sendable for FxpMkDir {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+    fn write_to<W: io::Write>(&self, w: &mut W) -> Result<()> {
         try!(self.path.write_to(w));
         Ok(try!(self.attrs.write_to(w)))
     }
@@ -539,7 +585,7 @@ impl Request for FxpRmDir {
 }
 
 impl Sendable for FxpRmDir {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+    fn write_to<W: io::Write>(&self, w: &mut W) -> Result<()> {
         Ok(try!(self.path.write_to(w)))
     }
 
@@ -558,7 +604,7 @@ impl Request for FxpRealPath {
 }
 
 impl Sendable for FxpRealPath {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+    fn write_to<W: io::Write>(&self, w: &mut W) -> Result<()> {
         Ok(try!(self.path.write_to(w)))
     }
 
@@ -577,7 +623,7 @@ impl Request for FxpStat {
 }
 
 impl Sendable for FxpStat {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+    fn write_to<W: io::Write>(&self, w: &mut W) -> Result<()> {
         Ok(try!(self.path.write_to(w)))
     }
 
@@ -597,7 +643,7 @@ impl Request for FxpRename {
 }
 
 impl Sendable for FxpRename {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+    fn write_to<W: io::Write>(&self, w: &mut W) -> Result<()> {
         try!(self.oldpath.write_to(w));
         Ok(try!(self.newpath.write_to(w)))
     }
@@ -617,7 +663,7 @@ impl Request for FxpReadLink {
 }
 
 impl Sendable for FxpReadLink {
-    fn write_to<W : io::Write>(&self, w: &mut W) -> Result<()> {
+    fn write_to<W: io::Write>(&self, w: &mut W) -> Result<()> {
         Ok(try!(self.path.write_to(w)))
     }
 
@@ -637,11 +683,14 @@ impl Response for FxpVersion {
 }
 
 impl Receivable for FxpVersion {
-    fn recv<R : io::Read>(r: &mut io::Take<R>) -> Result<FxpVersion> {
-            let version = try!(r.read_u32::<BigEndian>());
+    fn recv<R: io::Read>(r: &mut R) -> Result<FxpVersion> {
+            let version = try!(u32::recv(r));
+            let mut bytes = Vec::new();
+            let limit = try!(r.read_to_end(&mut bytes));
             let mut extensions = Vec::new();
-            while r.limit() > 0 {
-                extensions.push(try!(Extension::recv(r)));
+            let mut er = io::Cursor::new(bytes);
+            while er.position() < limit as u64 {
+                extensions.push(try!(Extension::recv(&mut er)));
             }
             Ok(FxpVersion{version: version, extensions: extensions})
     }
@@ -683,8 +732,8 @@ impl Response for FxpStatus {
 }
 
 impl Receivable for FxpStatus {
-    fn recv<R: io::Read>(r: &mut io::Take<R>) -> Result<FxpStatus> {
-        let icode = try!(r.read_u32::<BigEndian>());
+    fn recv<R: io::Read>(r: &mut R) -> Result<FxpStatus> {
+        let icode = try!(u32::recv(r));
         let msg = try!(Vec::<u8>::recv(r));
         try!(Vec::<u8>::recv(r));  // Skip lang
         let code = match icode {
@@ -742,7 +791,7 @@ impl Response for FxpHandle {
 }
 
 impl Receivable for FxpHandle {
-    fn recv<R: io::Read>(r: &mut io::Take<R>) -> Result<FxpHandle> {
+    fn recv<R: io::Read>(r: &mut R) -> Result<FxpHandle> {
         Ok(FxpHandle{handle: try!(Vec::<u8>::recv(r))})
     }
 }
@@ -757,7 +806,7 @@ impl Response for FxpData {
 }
 
 impl Receivable for FxpData {
-    fn recv<R: io::Read>(r: &mut io::Take<R>) -> Result<FxpData> {
+    fn recv<R: io::Read>(r: &mut R) -> Result<FxpData> {
         Ok(FxpData{data: try!(Vec::<u8>::recv(r))})
     }
 }
@@ -770,7 +819,7 @@ pub struct Name {
 }
 
 impl Receivable for Name {
-    fn recv<R: io::Read>(r: &mut io::Take<R>) -> Result<Name> {
+    fn recv<R: io::Read>(r: &mut R) -> Result<Name> {
         let filename = try!(Vec::<u8>::recv(r));
         let longname = try!(Vec::<u8>::recv(r));
         let attrs = try!(FileAttr::recv(r));
@@ -788,8 +837,8 @@ impl Response for FxpName {
 }
 
 impl Receivable for FxpName {
-    fn recv<R: io::Read>(r: &mut io::Take<R>) -> Result<FxpName> {
-        let count = try!(r.read_u32::<BigEndian>());
+    fn recv<R: io::Read>(r: &mut R) -> Result<FxpName> {
+        let count = try!(u32::recv(r));
         let mut names = Vec::new();
         for _ in 0..count {
             names.push(try!(Name::recv(r)));
@@ -798,22 +847,16 @@ impl Receivable for FxpName {
     }
 }
 
-pub fn recv<R : io::Read>(r: &mut R) -> Result<SftpResponse> {
-    let l = try!(r.read_u32::<BigEndian>());
+pub fn recv<R: io::Read>(r: &mut R) -> Result<SftpResponse> {
+    let l = try!(u32::recv(r));
     let mut lr = r.take(l as u64);
-    let msg_type = {
-        let mut x : [u8; 1] = [0];
-        if try!(lr.read(&mut x[..])) < 1 {
-            return Err(Error::UnexpectedEOF)
-        }
-        x[0]
-    };
+    let msg_type = try!(u8::recv(&mut lr));
     // SSH_FXP_VERSION is the one response that is returned without a request id. Hardcode it to
     // zero.
     let req_id = if msg_type == SSH_FXP_VERSION {
         0
     } else {
-        try!(lr.read_u32::<BigEndian>())
+        try!(u32::recv(&mut lr))
     };
     let response = if msg_type == SSH_FXP_VERSION {
         SftpResponsePacket::Version(try!(FxpVersion::recv(&mut lr)))
