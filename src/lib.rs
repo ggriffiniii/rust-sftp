@@ -142,13 +142,13 @@ impl<W> Client<W> where W : 'static + io::Write + Send {
         Ok(Client{sender: Arc::new(s)})
 	}
 
-    pub fn stat(&mut self, path: String) -> Result<packets::FileAttr> {
-        let p = packets::FxpStat{path: path.into_bytes()};
+    pub fn stat<S>(&mut self, path: S) -> Result<packets::FileAttr> where S: Into<String> {
+        let p = packets::FxpStat{path: path.into().into()};
         self.do_stat(p)
     }
 
-    pub fn lstat(&mut self, path: String) -> Result<packets::FileAttr> {
-        let p = packets::FxpLStat{path: path.into_bytes()};
+    pub fn lstat<S>(&mut self, path: S) -> Result<packets::FileAttr> where S: Into<String> {
+        let p = packets::FxpLStat{path: path.into().into()};
         self.do_stat(p)
     }
 
@@ -161,26 +161,26 @@ impl<W> Client<W> where W : 'static + io::Write + Send {
         }
     }
 
-    pub fn setstat(&mut self, path: String, attrs: packets::FileAttr) -> Result<()> {
-        let p = packets::FxpSetStat{path: path.into_bytes(), attrs: attrs};
+    pub fn setstat<S>(&mut self, path: S, attrs: packets::FileAttr) -> Result<()> where S: Into<String> {
+        let p = packets::FxpSetStat{path: path.into().into(), attrs: attrs};
         let resp = try!(self.sender.send_receive(&p));
         Client::<W>::expect_status_response(resp)
     }
 
-    pub fn mkdir(&mut self, path: String) -> Result<()> {
-        let p = packets::FxpMkDir{path: path.into_bytes(), attrs: packets::FileAttr::new()};
+    pub fn mkdir<S>(&mut self, path: S) -> Result<()> where S: Into<String> {
+        let p = packets::FxpMkDir{path: path.into().into(), attrs: packets::FileAttr::new()};
         let resp = try!(self.sender.send_receive(&p));
         Client::<W>::expect_status_response(resp)
     }
 
-    pub fn rmdir(&mut self, path: String) -> Result<()> {
-        let p = packets::FxpRmDir{path: path.into_bytes()};
+    pub fn rmdir<S>(&mut self, path: S) -> Result<()> where S: Into<String> {
+        let p = packets::FxpRmDir{path: path.into().into()};
         let resp = try!(self.sender.send_receive(&p));
         Client::<W>::expect_status_response(resp)
     }
 
-    pub fn realpath(&mut self, path: String) -> Result<packets::Name> {
-        let p = packets::FxpRealPath{path: path.into_bytes()};
+    pub fn realpath<S>(&mut self, path: S) -> Result<packets::Name> where S: Into<String> {
+        let p = packets::FxpRealPath{path: path.into().into()};
         let resp = try!(self.sender.send_receive(&p));
         match resp {
             packets::SftpResponsePacket::Name(mut name) => {
@@ -195,14 +195,14 @@ impl<W> Client<W> where W : 'static + io::Write + Send {
         }
     }
 
-    pub fn rename(&mut self, oldpath: String, newpath: String) -> Result<()> {
-        let p = packets::FxpRename{oldpath: oldpath.into_bytes(), newpath: newpath.into_bytes()};
+    pub fn rename<S, T>(&mut self, oldpath: S, newpath: T) -> Result<()> where S: Into<String>, T: Into<String> {
+        let p = packets::FxpRename{oldpath: oldpath.into().into(), newpath: newpath.into().into()};
         let resp = try!(self.sender.send_receive(&p));
         Client::<W>::expect_status_response(resp)
     }
 
-    pub fn readlink(&mut self, path: String) -> Result<packets::Name> {
-        let p = packets::FxpReadLink{path: path.into_bytes()};
+    pub fn readlink<S>(&mut self, path: S) -> Result<packets::Name> where S: Into<String> {
+        let p = packets::FxpReadLink{path: path.into().into()};
         let resp = try!(self.sender.send_receive(&p));
         match resp {
             packets::SftpResponsePacket::Name(mut name) => {
@@ -221,9 +221,9 @@ impl<W> Client<W> where W : 'static + io::Write + Send {
         OpenOptions{client: self, flags: 0}
     }
 
-    fn open(&mut self, filename: String, pflags: u32) -> Result<File<W>> {
+    fn open<S>(&mut self, filename: S, pflags: u32) -> Result<File<W>> where S: Into<String> {
         let p = packets::FxpOpen{
-            filename: filename.into_bytes(),
+            filename: filename.into().into(),
             pflags: pflags,
             attrs: packets::FileAttr::new(),
         };
@@ -237,14 +237,14 @@ impl<W> Client<W> where W : 'static + io::Write + Send {
         }
     }
 
-    pub fn remove(&mut self, filename: String) -> Result<()> {
-        let p = packets::FxpRemove{filename: filename.into_bytes()};
+    pub fn remove<S>(&mut self, filename: S) -> Result<()> where S: Into<String> {
+        let p = packets::FxpRemove{filename: filename.into().into()};
         let resp = try!(self.sender.send_receive(&p));
         Client::<W>::expect_status_response(resp)
     }
 
-    pub fn readdir(&mut self, path: String) -> Result<ReadDir<W>> {
-        let p = packets::FxpOpenDir{path: path.into_bytes()};
+    pub fn readdir<S>(&mut self, path: S) -> Result<ReadDir<W>> where S: Into<String> {
+        let p = packets::FxpOpenDir{path: path.into().into()};
         let resp = try!(self.sender.send_receive(&p));
         match resp {
             packets::SftpResponsePacket::Handle(handle) => {
@@ -311,7 +311,7 @@ impl<'a, W> OpenOptions<'a, W> where W : 'static + io::Write + Send {
         self.flag(SSH_FXF_EXCL, exclude)
     }
 
-    pub fn open(&mut self, path: String) -> Result<File<W>> {
+    pub fn open<S>(&mut self, path: S) -> Result<File<W>> where S: Into<String> {
         self.client.open(path, self.flags)
     }
 }

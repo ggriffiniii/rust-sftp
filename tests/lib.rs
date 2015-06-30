@@ -16,7 +16,7 @@ use std::fs::File;
 
 struct TempFile {
     file: tempfile::NamedTempFile,
-    links: Vec<String>,
+    links: Vec<std::path::PathBuf>,
 }
 
 impl TempFile {
@@ -24,16 +24,16 @@ impl TempFile {
         TempFile{file: tempfile::NamedTempFile::new().unwrap(), links: Vec::new()}
     }
 
-    fn path(&self) -> String {
-        From::from(self.file.path().to_str().unwrap())
+    fn path(&self) -> &str {
+        self.file.path().to_str().unwrap()
     }
 
     fn symlink(&mut self) -> String {
-        let link_path =
-            tempfile::NamedTempFile::new().unwrap().path().to_str().unwrap().to_string();
-        std::fs::soft_link(self.path(), &link_path).unwrap();
-        self.links.push(link_path.clone());
-        link_path
+        let tempfile = tempfile::NamedTempFile::new().unwrap().path().to_owned();
+        std::fs::soft_link(self.path(), &tempfile).unwrap();
+        let ret = tempfile.to_str().unwrap().into();
+        self.links.push(tempfile);
+        ret
     }
 }
 
@@ -224,14 +224,14 @@ fn can_remove() {
 
 #[test]
 fn can_mkdir() {
-    let tempfile_path = TempFile::new().path();
+    let tempfile_path = TempFile::new().path().to_string();
     let mut server = TestSftpServer::new();
     let mut client = server.client();
     match std::fs::metadata(&tempfile_path) {
         Ok(_) => panic!("file already exists: {}", &tempfile_path),
         _ => {},
     }
-    client.mkdir(tempfile_path.clone()).unwrap();
+    client.mkdir(tempfile_path.as_str()).unwrap();
     match std::fs::metadata(&tempfile_path) {
         Ok(metadata) => assert!(metadata.is_dir()),
         Err(x) => panic!("unable to stat directory {}: {:?}", &tempfile_path, x),
@@ -241,11 +241,11 @@ fn can_mkdir() {
 
 #[test]
 fn can_rmdir() {
-    let tempfile_path = TempFile::new().path();
+    let tempfile_path = TempFile::new().path().to_string();
     let mut server = TestSftpServer::new();
     let mut client = server.client();
     std::fs::create_dir(&tempfile_path).unwrap();
-    client.rmdir(tempfile_path.clone()).unwrap();
+    client.rmdir(tempfile_path.as_str()).unwrap();
     match std::fs::metadata(&tempfile_path) {
         Ok(_) => panic!("directory still exists: {}", tempfile_path),
         Err(_) => {},
@@ -285,31 +285,31 @@ fn can_realpath() {
     let mut server = TestSftpServer::new();
     let mut client = server.client();
     let name = client.realpath(tempfile.path()).unwrap();
-    assert_eq!(tempfile.path().into_bytes(), name.filename);
+    assert_eq!(tempfile.path().to_string().into_bytes(), name.filename);
 }
 
 #[test]
 fn can_rename() {
     let tempfile = TempFile::new();
-    let newpath = TempFile::new().path();
+    let newpath = TempFile::new().path().to_string();
     let mut server = TestSftpServer::new();
     let mut client = server.client();
     match std::fs::metadata(&newpath) {
         Ok(_) => panic!("file already exists: {}", &newpath),
         _ => {},
     }
-    client.rename(tempfile.path(), newpath.clone()).unwrap();
+    client.rename(tempfile.path(), newpath.as_str()).unwrap();
     std::fs::metadata(&newpath).unwrap();
 }
 
 #[test]
 fn can_readlink() {
     const LINK_TARGET : &'static str = "/tmp/foobar";
-    let linkpath = TempFile::new().path();
+    let linkpath = TempFile::new().path().to_string();
     std::os::unix::fs::symlink(LINK_TARGET, &linkpath).unwrap();
     let mut server = TestSftpServer::new();
     let mut client = server.client();
-    let dst = client.readlink(linkpath.clone()).unwrap();
+    let dst = client.readlink(linkpath.as_str()).unwrap();
     assert_eq!(LINK_TARGET.as_bytes(), dst.filename.as_slice());
     let _ = std::fs::remove_file(linkpath);
 }
